@@ -31,13 +31,12 @@
 #define MAX_INSTRUMENTS 64   // pently limit is 256/5
 #define MAX_MACRO_LEN   128  // real max is like, 254?
 
-const char *in_filename = NULL;
-const char *out_filename = NULL;
-
+//////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
 const char *supported_effects = "03BCDGQRS";
 const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "", "attack"};
 
+//////////////////// enums and structs ////////////////////
 enum {
   CH_SQUARE1,
   CH_SQUARE2,
@@ -101,6 +100,8 @@ typedef struct ftmacro {
   uint8_t length, loop, release;
   char sequence[MAX_MACRO_LEN];
 } ftmacro;
+
+//////////////////// functions ////////////////////
 
 // shows an error and stops the program
 void die(const char *reason) {
@@ -180,13 +181,14 @@ char *skip_to_number(char *string) {
   return string;
 }
 
-// global variables
+//////////////////// global variables ////////////////////
 ftsong song;
 int song_num = 0;
 char instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
 char instrument_used[MAX_INSTRUMENTS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
+const char *in_filename, *out_filename;
 
 // writes the numbers for an instrument's envelope, including the loop point
 void write_macro(FILE *file, ftmacro *macro) {
@@ -229,6 +231,9 @@ void write_duration(FILE *file, int duration) {
 
 // writes a pattern to the output file
 void write_pattern(FILE *file, int id, int channel) {
+  if(channel > CH_TRIANGLE) // noise and drum not implemented yet
+    return;
+
   ftnote *pattern = song.pattern[id][channel];
   int i;
 
@@ -239,6 +244,7 @@ void write_pattern(FILE *file, int id, int channel) {
       instrument = pattern[i].instrument;
       break;
     }
+  // generate pattern name and specify absolute octaves
   fprintf(file, "\r\n  pattern pat_%i_%i_%i with %s on %s\r\n", song_num, channel, id, instrument_name[instrument], chan_name[channel]);
   fprintf(file, "    absolute\r\n");
   fprintf(file, "    ");
@@ -255,11 +261,19 @@ void write_pattern(FILE *file, int id, int channel) {
     // the distance between this note and the next note is the duration
     int duration = next-row;
 
+    // write any instrument changes
+    if(pattern[row].instrument != instrument) {
+      instrument = pattern[row].instrument;
+      fprintf(file, " @%s ", instrument_name[instrument]);
+    }
+
     // write note
     if(this_note == '-' || !this_note)
       fprintf(file, "r");
     else {
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
+
+      // shift the octave in the direction needed
       if(octave > 2)
         for(i=2; i!= octave; i++)
           fputc('\'', file);
@@ -334,6 +348,8 @@ int main(int argc, char *argv[]) {
          arg = strchr(arg, ':');
          if(!arg)
            break;
+         char *line = arg;
+         arg++;
 
          // read note info
          ftnote note;
@@ -341,18 +357,17 @@ int main(int argc, char *argv[]) {
  
          note.instrument = -1;
 
-         if(arg[2] == '.') // if no note, skip
+         if(line[2] == '.') // if no note, skip
            continue;
-         song.pattern_used[song.pattern_id][channel] = 1;
 
          // sharp note are uppercase
-         note.note = (arg[3]=='#')?toupper(arg[2]):tolower(arg[2]);
+         note.note = (line[3]=='#')?toupper(line[2]):tolower(line[2]);
          // octave will be garbage for note cut
-         note.octave = arg[4]-'0';
+         note.octave = line[4]-'0';
 
          // read instrument if it's there
-         if(arg[6] != '.') {
-           note.instrument = strtol(arg+6, NULL, 16);
+         if(line[6] != '.') {
+           note.instrument = strtol(line+6, NULL, 16);
            check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS);
            instrument_used[(unsigned)note.instrument] = 1;
          } else { // if it's not, go back and find it
@@ -363,13 +378,13 @@ int main(int argc, char *argv[]) {
              }
          }
 
-         if(arg[9] != '.')
+         if(line[9] != '.')
            die("volume column not supported");
 
          song.pattern[song.pattern_id][channel][row] = note;
 
          // to do: effects
-         arg++;
+         
       }
 
     }
@@ -443,31 +458,34 @@ int main(int argc, char *argv[]) {
       real_tempo *= song.tempo;
       fprintf(output_file, "  time 4/4\r\n  scale 16\r\n  tempo %.2f\r\n", real_tempo);
 
-      // determine which patterns are actually used
-      for(i=0; i<song.frames; i++)
-        for(j=0; j<CHANNEL_COUNT; j++) {
-          int num = song.frame[i][j];
-          if(song.pattern_used[num][j] == 1)
-            song.pattern_used[num][j] = 2;
+      // write the actually used (not empty) patterns
+      for(j=0; j<CHANNEL_COUNT; j++)
+        for(i=0; i<MAX_PATTERNS; i++) {
+          int not_empty = 0;
+          for(int row = 0; row < song.rows; row++)
+            if(isalpha(song.pattern[i][j][row].note)) {
+              not_empty = 1;
+              break;
+            }
+          song.pattern_used[i][j] = not_empty;
+
+          if(not_empty)
+            write_pattern(output_file, i, j);
         }
 
-      // write the actually used patterns
-      for(j=0; j<CHANNEL_COUNT; j++)
-        for(i=0; i<MAX_PATTERNS; i++)
-          if(song.pattern_used[i][j] && j != CH_NOISE)
-//          if(song.pattern_used[i][j] == 2 && j != CH_NOISE)
-            write_pattern(output_file, i, j);
-
       // write the frames
+      int channel_playing[CHANNEL_COUNT] = {0, 0, 0, 0, 0, 0};
       for(i=0; i<song.frames; i++) {
         fprintf(output_file, "\r\n  at %i", 1+(song.rows/16)*i);
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = song.frame[i][j];
-          if(j<3)
-//          if(song.pattern_used[i][pattern] == 2 && j != CH_NOISE)
+          if(j<3 && song.pattern_used[j][pattern]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
-//          else if(i && song.pattern_used[i-1][j] == 2)
-//            fprintf(output_file, "\r\n  stop %s", chan_name[j]);
+            channel_playing[j] = 1;
+          } else if(channel_playing[j]) {
+            fprintf(output_file, "\r\n  stop %s", chan_name[j]);
+            channel_playing[j] = 0;
+          }
         }
       }
       fprintf(output_file, "\r\n  at %i\r\n  fine", 1+(song.rows/16)*song.frames);
@@ -477,6 +495,7 @@ int main(int argc, char *argv[]) {
 
   }
 
+  // close files
   fclose(input_file);
   fprintf(output_file, "\r\n\r\n");
   fclose(output_file);

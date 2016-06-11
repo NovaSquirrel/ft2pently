@@ -1,3 +1,11 @@
+# Pently stuff
+*.txt
+*.pently
+
+# other stuff
+*.ftm
+test.bat
+
 # Object files
 *.o
 *.ko
