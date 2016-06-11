@@ -30,6 +30,9 @@
 #define MAX_PATTERNS    32   // real max is 128
 #define MAX_INSTRUMENTS 64   // pently limit is 256/5
 #define MAX_MACRO_LEN   128  // real max is like, 254?
+#define MAX_OCTAVE      7
+#define NUM_OCTAVES     7
+#define NUM_SEMITONES   12
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
@@ -127,18 +130,18 @@ void strlcpy(char *Destination, const char *Source, int MaxLength) {
   Destination[MaxLength-1] = 0;
 }
 
+// removes one line ending if found
+void remove_line_ending(char *text, char ending) {
+  text = strrchr(text, ending);
+  if(text)
+    *text = 0;
+}
+
 // removes \n, \r or " if found on the end of a string
 void remove_line_endings(char *buffer) {
-  char *text;
-  text = strrchr(buffer, '\n');
-  if(text)
-    *text = 0;
-  text = strrchr(buffer, '\r');
-  if(text)
-    *text = 0;
-  text = strrchr(buffer, '\"'); // remove "s too
-  if(text)
-    *text = 0;
+  remove_line_ending(buffer, '\n');
+  remove_line_ending(buffer, '\r');
+  remove_line_ending(buffer, '\"');
 }
 
 // makes a label-friendly version of a name
@@ -189,6 +192,7 @@ char instrument_used[MAX_INSTRUMENTS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
 const char *in_filename, *out_filename;
+char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 
 // writes the numbers for an instrument's envelope, including the loop point
 void write_macro(FILE *file, ftmacro *macro) {
@@ -231,7 +235,7 @@ void write_duration(FILE *file, int duration) {
 
 // writes a pattern to the output file
 void write_pattern(FILE *file, int id, int channel) {
-  if(channel > CH_TRIANGLE) // noise and drum not implemented yet
+  if(channel == CH_NOISE) // noise not implemented yet
     return;
 
   ftnote *pattern = song.pattern[id][channel];
@@ -245,9 +249,10 @@ void write_pattern(FILE *file, int id, int channel) {
       break;
     }
   // generate pattern name and specify absolute octaves
-  fprintf(file, "\r\n  pattern pat_%i_%i_%i with %s on %s\r\n", song_num, channel, id, instrument_name[instrument], chan_name[channel]);
-  fprintf(file, "    absolute\r\n");
-  fprintf(file, "    ");
+  fprintf(file, "\r\n  pattern pat_%i_%i_%i", song_num, channel, id);
+  if(channel != CH_DPCM && channel != CH_NOISE)
+    fprintf(file, " with %s on %s\r\n    absolute", instrument_name[instrument], chan_name[channel]);
+  fprintf(file, "\r\n    ");
 
   int row = 0;
   while(row < song.rows) {
@@ -270,7 +275,7 @@ void write_pattern(FILE *file, int id, int channel) {
     // write note
     if(this_note == '-' || !this_note)
       fprintf(file, "r");
-    else {
+    else if(channel != CH_DPCM) {
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
 
       // shift the octave in the direction needed
@@ -280,6 +285,9 @@ void write_pattern(FILE *file, int id, int channel) {
       if(octave < 2)
         for(i=2; i!= octave; i--)
           fputc(',', file);
+    } else { // DPCM
+      char *scale_note = strchr(scale, this_note);
+      fprintf(file, "%s", drum_name[octave][scale_note-scale]);
     }
     write_duration(file, duration);
 
@@ -295,6 +303,7 @@ int main(int argc, char *argv[]) {
   memset(&instrument_used, 0, sizeof(instrument_used));
   memset(&instrument_macro, 0, sizeof(instrument_macro));
   memset(&instrument_name, 0, sizeof(instrument_name));
+  memset(&drum_name, 0, sizeof(drum_name));
 
   // read arguments
   for(i=1; i<argc; i++) {
@@ -388,6 +397,30 @@ int main(int argc, char *argv[]) {
       }
 
     }
+    else if(starts_with(buffer, "COMMENT ", &arg)) {
+      remove_line_ending(buffer, '\r');
+      if(*arg == '\"')
+        arg++;
+      char *arg2;
+      if(starts_with(arg, "include ", &arg2)) {
+        FILE *included = fopen(arg2, "rb");
+        if(!included)
+          die("couldn't open included file");
+        while(!feof(included)) {
+          char c = fgetc(included);
+          if(c != EOF)
+            fputc(c, output_file);
+        }
+        fclose(included);
+      } else if(starts_with(arg, "drum ", &arg2)) {
+        char *note = strchr(scale, arg2[0]);
+        if(!note)
+          die("invalid note in scale");
+        int octave = arg2[1]-'0';
+        check_range("drum octave", octave, 0, NUM_OCTAVES);
+        strlcpy(drum_name[octave][note-scale], arg2+3, 16);
+      }
+    }
 
     else if(starts_with(buffer, "MACRO ", &arg)) {
       int setting = strtol(arg, &arg, 10);
@@ -479,7 +512,7 @@ int main(int argc, char *argv[]) {
         fprintf(output_file, "\r\n  at %i", 1+(song.rows/16)*i);
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = song.frame[i][j];
-          if(j<3 && song.pattern_used[j][pattern]) {
+          if(j != CH_NOISE && j != CH_ATTACK && song.pattern_used[j][pattern]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) {
