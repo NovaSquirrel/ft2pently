@@ -36,8 +36,9 @@
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
-const char *supported_effects = "03BCDGQRS";
-const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "", "attack"};
+const char *supported_effects = "03GQRS";
+const char *conductor_effects = "BCDF";
+const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "drum", "attack"};
 
 //////////////////// enums and structs ////////////////////
 enum {
@@ -68,6 +69,7 @@ enum {
   FX_LOOP     = 'B', // jump to frame X
   FX_FINE     = 'C', // stop song
   FX_PAT_CUT  = 'D', // skip to next pattern
+  FX_TEMPO    = 'F', // change tempo or speed
   FX_DELAY    = 'G', // delay for X frames
   FX_SLUR_UP  = 'Q', // note for one row, slur into pitch X semitones up
   FX_SLUR_DN  = 'R', // note for one row, slur into pitch X semitones down
@@ -93,6 +95,7 @@ typedef struct ftsong {
   int frame[MAX_FRAMES][CHANNEL_COUNT];
   ftnote pattern[MAX_PATTERNS][CHANNEL_COUNT][MAX_ROWS];
   uint8_t pattern_used[MAX_PATTERNS][CHANNEL_COUNT];
+  int effect_columns[CHANNEL_COUNT];
 
   // Song status information
   int pattern_id, frames;
@@ -248,6 +251,7 @@ void write_pattern(FILE *file, int id, int channel) {
       instrument = pattern[i].instrument;
       break;
     }
+
   // generate pattern name and specify absolute octaves
   fprintf(file, "\r\n  pattern pat_%i_%i_%i", song_num, channel, id);
   if(channel != CH_DPCM && channel != CH_NOISE)
@@ -270,6 +274,13 @@ void write_pattern(FILE *file, int id, int channel) {
     if(pattern[row].instrument != instrument) {
       instrument = pattern[row].instrument;
       fprintf(file, " @%s ", instrument_name[instrument]);
+    }
+
+    // handle any effects
+    for(i=0; i<MAX_EFFECTS; i++) {
+      switch(pattern[row].effect[i]) {
+        case FX_ARP:
+          fprintf(file, "@EN%.2x ", pattern[row].param[i]);
     }
 
     // write note
@@ -390,10 +401,14 @@ int main(int argc, char *argv[]) {
          if(line[9] != '.')
            die("volume column not supported");
 
-         song.pattern[song.pattern_id][channel][row] = note;
+         // read effects
+         for(j=0; j<song.effect_columns[channel]; j++) {
+           char *effect = line+11;
+           note.effect[j] = *effect;
+           note.param[j]  = strtol(effect+1, NULL, 16);
+         }
 
-         // to do: effects
-         
+         song.pattern[song.pattern_id][channel][row] = note;
       }
 
     }
@@ -420,6 +435,12 @@ int main(int argc, char *argv[]) {
         check_range("drum octave", octave, 0, NUM_OCTAVES);
         strlcpy(drum_name[octave][note-scale], arg2+3, 16);
       }
+    }
+
+    else if(starts_with(buffer, "COLUMNS ", &arg)) {
+      arg = skip_to_number(arg);
+      for(i=0;*arg;i++)
+        song.effect_columns[i] = strtol(arg, &arg, 10);
     }
 
     else if(starts_with(buffer, "MACRO ", &arg)) {
