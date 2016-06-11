@@ -512,7 +512,7 @@ int main(int argc, char *argv[]) {
         fprintf(output_file, "\r\n  at %i", 1+(song.rows/16)*i);
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = song.frame[i][j];
-          if(j != CH_NOISE && j != CH_ATTACK && song.pattern_used[j][pattern]) {
+          if(j != CH_NOISE && j != CH_ATTACK && song.pattern_used[pattern][j]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) {
