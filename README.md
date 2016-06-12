@@ -12,9 +12,9 @@ Most effects are unsupported, as is the volume column and "pitch" and "hi-pitch"
 
 Supported effects:
 * 0xx - arpeggio
-* bxx - set loop point
-* cxx - stop song
-* dxx - pattern cut (xx ignored, always zero)
+* Bxx - set loop point
+* Cxx - stop song
+* Dxx - pattern cut (xx ignored, always zero)
 
 -----
 
