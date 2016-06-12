@@ -51,7 +51,7 @@ enum {
   CHANNEL_COUNT
 };
 
-// 
+// types of envelopes
 enum {
   MS_VOLUME,
   MS_ARPEGGIO,
@@ -95,7 +95,9 @@ typedef struct ftsong {
   int frame[MAX_FRAMES][CHANNEL_COUNT];
   ftnote pattern[MAX_PATTERNS][CHANNEL_COUNT][MAX_ROWS];
   uint8_t pattern_used[MAX_PATTERNS][CHANNEL_COUNT];
+  int pattern_length[MAX_PATTERNS][CHANNEL_COUNT];
   int effect_columns[CHANNEL_COUNT];
+  int loop_to;
 
   // Song status information
   int pattern_id, frames;
@@ -236,6 +238,18 @@ void write_duration(FILE *file, int duration) {
   }
 }
 
+// write a time in the format "at" takes
+void write_time(FILE *file, int rows) {
+  int measure = rows / 16;
+  int beat    = (rows % 16) / 4;
+  int row     = (rows % 16) % 4;
+
+  fprintf(file, "%i", measure+1);
+  if(beat || row) {
+    fprintf(file, ":%i:%i", beat+1, row+1);
+  }
+}
+
 // writes a pattern to the output file
 void write_pattern(FILE *file, int id, int channel) {
   if(channel == CH_NOISE) // noise not implemented yet
@@ -259,12 +273,12 @@ void write_pattern(FILE *file, int id, int channel) {
   fprintf(file, "\r\n    ");
 
   int row = 0;
-  while(row < song.rows) {
+  while(row < song.pattern_length[id][channel]) {
     char this_note = pattern[row].note;
     int next, octave = pattern[row].octave;
 
     // find the next note
-    for(next = row+1; next < song.rows; next++)
+    for(next = row+1; next < song.pattern_length[id][channel]; next++)
       if(pattern[next].note)
         break;
     // the distance between this note and the next note is the duration
@@ -281,6 +295,7 @@ void write_pattern(FILE *file, int id, int channel) {
       switch(pattern[row].effect[i]) {
         case FX_ARP:
           fprintf(file, "@EN%.2x ", pattern[row].param[i]);
+      }
     }
 
     // write note
@@ -348,6 +363,9 @@ int main(int argc, char *argv[]) {
       song_num++;
       memset(&song, 0, sizeof(song));
       song.rows = strtol(arg, &arg, 10);
+      for(i=0; i<MAX_PATTERNS; i++)
+        for(j=0; j<CHANNEL_COUNT; j++)
+          song.pattern_length[i][j] = song.rows;
       song.speed = strtol(arg, &arg, 10);
       song.tempo = strtol(arg, &arg, 10);
       arg = strchr(arg, '\"');
@@ -377,35 +395,50 @@ int main(int argc, char *argv[]) {
  
          note.instrument = -1;
 
-         if(line[2] == '.') // if no note, skip
-           continue;
+         if(line[2] != '.') {
+           // sharp note are uppercase
+           note.note = (line[3]=='#')?toupper(line[2]):tolower(line[2]);
+           // octave will be garbage for note cut
+           note.octave = line[4]-'0';
 
-         // sharp note are uppercase
-         note.note = (line[3]=='#')?toupper(line[2]):tolower(line[2]);
-         // octave will be garbage for note cut
-         note.octave = line[4]-'0';
+           // read instrument if it's there
+           if(line[6] != '.') {
+             note.instrument = strtol(line+6, NULL, 16);
+             check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS);
+             instrument_used[(unsigned)note.instrument] = 1;
+           } else { // if it's not, go back and find it
+             for(j=row-1; j>=0; j--)
+               if(song.pattern[song.pattern_id][channel][j].note && (song.pattern[song.pattern_id][channel][j].instrument != -1)) {
+                 note.instrument = song.pattern[song.pattern_id][channel][j].instrument;
+                 break;
+               }
+           }
 
-         // read instrument if it's there
-         if(line[6] != '.') {
-           note.instrument = strtol(line+6, NULL, 16);
-           check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS);
-           instrument_used[(unsigned)note.instrument] = 1;
-         } else { // if it's not, go back and find it
-           for(j=row-1; j>=0; j--)
-             if(song.pattern[song.pattern_id][channel][j].note && (song.pattern[song.pattern_id][channel][j].instrument != -1)) {
-               note.instrument = song.pattern[song.pattern_id][channel][j].instrument;
-               break;
-             }
+           if(line[9] != '.')
+             die("volume column not supported");
          }
-
-         if(line[9] != '.')
-           die("volume column not supported");
 
          // read effects
          for(j=0; j<song.effect_columns[channel]; j++) {
            char *effect = line+11;
            note.effect[j] = *effect;
            note.param[j]  = strtol(effect+1, NULL, 16);
+           if(strchr(conductor_effects, note.effect[j])) {
+             switch(note.effect[j]) {
+               case FX_TEMPO:
+                 // to do
+                 break;
+               case FX_LOOP:
+                 song.loop_to = note.param[j];
+                 goto pattern_cut;
+               case FX_FINE:
+                 song.loop_to = -1;
+               case FX_PAT_CUT:
+               pattern_cut:
+                 song.pattern_length[song.pattern_id][channel] = row+1;
+             }
+             note.effect[j] = 0;
+           }
          }
 
          song.pattern[song.pattern_id][channel][row] = note;
@@ -529,20 +562,35 @@ int main(int argc, char *argv[]) {
 
       // write the frames
       int channel_playing[CHANNEL_COUNT] = {0, 0, 0, 0, 0, 0};
+      int total_rows = 0;
       for(i=0; i<song.frames; i++) {
-        fprintf(output_file, "\r\n  at %i", 1+(song.rows/16)*i);
+        fprintf(output_file, "\r\n  at ");;
+        write_time(output_file, total_rows);
+        if(song.loop_to == i && song.loop_to)
+          fprintf(output_file, "\r\n  segno");
+
+        int min_length = MAX_ROWS; // minimum pattern length in this frame
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = song.frame[i][j];
           if(j != CH_NOISE && j != CH_ATTACK && song.pattern_used[pattern][j]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
-          } else if(channel_playing[j]) {
+          } else if(channel_playing[j]) { // stop channel if it was playing but now it isn't
             fprintf(output_file, "\r\n  stop %s", chan_name[j]);
             channel_playing[j] = 0;
           }
+          if(song.pattern_length[pattern][j] < min_length)
+            min_length = song.pattern_length[pattern][j];
         }
+        total_rows += min_length;
       }
-      fprintf(output_file, "\r\n  at %i\r\n  fine", 1+(song.rows/16)*song.frames);
+      fprintf(output_file, "\r\n  at ");
+      write_time(output_file, total_rows);
+      fprintf(output_file, "\r\n  ");
+      if(song.loop_to != -1)
+        fprintf(output_file, "dal segno");
+      else
+        fprintf(output_file, "fine");
 
       need_song_export = 0;
     }
