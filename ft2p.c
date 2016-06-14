@@ -277,7 +277,7 @@ void write_pattern(FILE *file, int id, int channel) {
     return;
 
   ftnote *pattern = song.pattern[id][channel];
-  int i, slur=0;
+  int i, slur = 0, delay_cut = 0;
 
   // find the instrument used for the pattern
   int instrument = -1;
@@ -320,13 +320,21 @@ void write_pattern(FILE *file, int id, int channel) {
         case FX_ARP:
           fprintf(file, "@EN%.2x ", pattern[row].param[i]);
           break;
+        case FX_DELAY:
+          fprintf(file, "r%ig ", pattern[row].param[i]);
+          break;
+        case FX_DELAYCUT:
+          delay_cut = pattern[row].param[i];
+          if(this_note && !pattern[row+1].note)
+            pattern[row+1].note = '-';
+          break;
       }
     }
 
     // write note
-    if(this_note == '-' || !this_note)
+    if(this_note == '-' || !this_note) {
       fprintf(file, "r");
-    else if(channel != CH_DPCM) {
+    } else if(channel != CH_DPCM) {
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
 
       // shift the octave in the direction needed
@@ -339,6 +347,10 @@ void write_pattern(FILE *file, int id, int channel) {
     } else { // DPCM
       char *scale_note = strchr(scale, this_note);
       fprintf(file, "%s", drum_name[octave][scale_note-scale]);
+    }
+    if(delay_cut && isalpha(this_note)) {
+      fprintf(file, "%ig r16 w", delay_cut);
+      delay_cut = 0;
     }
     write_duration(file, duration, slur|pattern[row].slur);
 
@@ -456,15 +468,18 @@ int main(int argc, char *argv[]) {
            ftnote *next_note = &song.pattern[song.pattern_id][channel][row+1];
 
            switch(*effect) {
+             case FX_DELAYCUT: // fix for delaying a cut on an empty row
+               if(!note.note)
+                 note.note = '~';
+               break;
              case FX_SLUR:
-               if(note.param[j])
+               if(note.param[j]) // set slur on previous note
                  for(int k=row-1; k >= 0; k--)
                    if(song.pattern[song.pattern_id][channel][k].note) {
                      song.pattern[song.pattern_id][channel][k].slur = 1;
                      break;
                    }
                break;
-
              case FX_SLUR_UP:
                note.slur = 1;
                *next_note = make_note(note.octave, note.note, note.instrument);
@@ -475,7 +490,6 @@ int main(int argc, char *argv[]) {
                *next_note = make_note(note.octave, note.note, note.instrument);
                shift_semitones(next_note, -(note.param[j]&15));
                break;
-
              case FX_TEMPO:
                // to do
                break;
