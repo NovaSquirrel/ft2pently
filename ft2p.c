@@ -271,6 +271,14 @@ void write_time(FILE *file, int rows) {
   }
 }
 
+// writes a tempo
+void write_tempo(FILE *file, int speed, int tempo) {
+  float real_tempo = 6;
+  real_tempo /= speed;
+  real_tempo *= tempo;
+  fprintf(file, "  tempo %.2f", real_tempo);
+}
+
 // writes a pattern to the output file
 void write_pattern(FILE *file, int id, int channel) {
   if(channel == CH_NOISE) // noise not implemented yet
@@ -490,9 +498,6 @@ int main(int argc, char *argv[]) {
                *next_note = make_note(note.octave, note.note, note.instrument);
                shift_semitones(next_note, -(note.param[j]&15));
                break;
-             case FX_TEMPO:
-               // to do
-               break;
              case FX_LOOP:
                song.loop_to = note.param[j];
                goto pattern_cut;
@@ -602,11 +607,9 @@ int main(int argc, char *argv[]) {
       need_song_export = 1;
     }
     if(need_song_export == 1) {
-      fprintf(output_file, "\r\nsong %s\r\n", song.name);
-      float real_tempo = 6;
-      real_tempo /= song.speed;
-      real_tempo *= song.tempo;
-      fprintf(output_file, "  time 4/4\r\n  scale 16\r\n  tempo %.2f\r\n", real_tempo);
+      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", song.name);
+      write_tempo(output_file, song.speed, song.tempo);
+      fprintf(output_file, "\r\n");
 
       // write the actually used (not empty) patterns
       for(j=0; j<CHANNEL_COUNT; j++)
@@ -644,6 +647,28 @@ int main(int argc, char *argv[]) {
           }
           if(song.pattern_length[pattern][j] < min_length)
             min_length = song.pattern_length[pattern][j];
+        }
+
+        // look for tempo changes
+        for(int row=0; row<min_length; row++) {
+          int speed = 0, tempo = 0;
+          for(int j=0; j<CHANNEL_COUNT; j++) {
+            int pattern = song.frame[i][j];
+            ftnote *note = &song.pattern[pattern][j][row];
+            for(int fx=0; fx<MAX_EFFECTS; fx++)
+              if(note->effect[fx] == FX_TEMPO) {
+                if(note->param[fx] < 0x20)
+                  speed = note->param[fx];
+                else
+                  tempo = note->param[fx];
+              }
+          }
+          if(speed||tempo) {
+            fprintf(output_file, "\r\n  at ");
+            write_time(output_file, total_rows+row);
+            fprintf(output_file, "\r\n");
+            write_tempo(output_file, speed?speed:song.speed, tempo?tempo:song.tempo);
+          }
         }
         total_rows += min_length;
       }
