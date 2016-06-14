@@ -73,7 +73,8 @@ enum {
   FX_DELAY    = 'G', // delay for X frames
   FX_SLUR_UP  = 'Q', // note for one row, slur into pitch X semitones up
   FX_SLUR_DN  = 'R', // note for one row, slur into pitch X semitones down
-  FX_DELAYCUT = 'S'  // grace note for X frames then rest
+  FX_DELAYCUT = 'S', // grace note for X frames then rest
+  FX_ATTACK_ON= 'H'  // repurposed to specify attack target
 };
 
 // a note on a pattern
@@ -83,6 +84,7 @@ typedef struct ftnote {
   char instrument;            // instrument number
   char effect[MAX_EFFECTS];   // effect name
   uint8_t param[MAX_EFFECTS]; // effect parameter
+  uint8_t slur;               // nonzero if note has slur
 } ftnote;
 
 // a song and its patterns
@@ -110,6 +112,25 @@ typedef struct ftmacro {
 } ftmacro;
 
 //////////////////// functions ////////////////////
+
+ftnote make_note(uint8_t octave, char note, char instrument) {
+  ftnote new_note;
+  memset(&new_note, 0, sizeof(new_note));
+  new_note.octave = octave;
+  new_note.note = note;
+  new_note.instrument = instrument;
+  return new_note;
+}
+
+// offsets a note by a given number of semitones
+void shift_semitones(ftnote *note, int offset) {
+  if(!isalpha(note->note))
+    return;
+  int semitone = (strchr(scale, note->note)-scale)+(note->octave*NUM_SEMITONES);
+  semitone += offset;
+  note->note = scale[semitone % NUM_SEMITONES];
+  note->octave = semitone / NUM_SEMITONES;
+}
 
 // shows an error and stops the program
 void die(const char *reason) {
@@ -211,7 +232,7 @@ void write_macro(FILE *file, ftmacro *macro) {
 }
 
 // converts the number of rows to a Pently note duration
-void write_duration(FILE *file, int duration) {
+void write_duration(FILE *file, int duration, int slur) {
   const char *durations[] = {
     /* 1 */ "16",
     /* 2 */ "8",
@@ -231,7 +252,7 @@ void write_duration(FILE *file, int duration) {
     /*16 */ "1"
   };
   duration--;
-  fprintf(file, "%s ", durations[duration%16]);
+  fprintf(file, "%s%s ", durations[duration%16], slur?"~":"");
   while(duration > 16) {
     fprintf(file, "w1 ");
     duration -= 16;
@@ -256,7 +277,7 @@ void write_pattern(FILE *file, int id, int channel) {
     return;
 
   ftnote *pattern = song.pattern[id][channel];
-  int i;
+  int i, slur=0;
 
   // find the instrument used for the pattern
   int instrument = -1;
@@ -293,8 +314,12 @@ void write_pattern(FILE *file, int id, int channel) {
     // handle any effects
     for(i=0; i<MAX_EFFECTS; i++) {
       switch(pattern[row].effect[i]) {
+        case FX_SLUR:
+          slur = pattern[row].param[i] != 0;
+          break;
         case FX_ARP:
           fprintf(file, "@EN%.2x ", pattern[row].param[i]);
+          break;
       }
     }
 
@@ -315,7 +340,7 @@ void write_pattern(FILE *file, int id, int channel) {
       char *scale_note = strchr(scale, this_note);
       fprintf(file, "%s", drum_name[octave][scale_note-scale]);
     }
-    write_duration(file, duration);
+    write_duration(file, duration, slur|pattern[row].slur);
 
     row = next;
   }
@@ -389,6 +414,10 @@ int main(int argc, char *argv[]) {
          char *line = arg;
          arg++;
 
+         // skip if the note is already filled in
+         if(song.pattern[song.pattern_id][channel][row].note)
+           continue;
+
          // read note info
          ftnote note;
          memset(&note, 0, sizeof(note));
@@ -423,21 +452,41 @@ int main(int argc, char *argv[]) {
            char *effect = line+11;
            note.effect[j] = *effect;
            note.param[j]  = strtol(effect+1, NULL, 16);
-           if(strchr(conductor_effects, note.effect[j])) {
-             switch(note.effect[j]) {
-               case FX_TEMPO:
-                 // to do
-                 break;
-               case FX_LOOP:
-                 song.loop_to = note.param[j];
-                 goto pattern_cut;
-               case FX_FINE:
-                 song.loop_to = -1;
-               case FX_PAT_CUT:
-               pattern_cut:
-                 song.pattern_length[song.pattern_id][channel] = row+1;
-             }
-             note.effect[j] = 0;
+
+           ftnote *next_note = &song.pattern[song.pattern_id][channel][row+1];
+
+           switch(*effect) {
+             case FX_SLUR:
+               if(note.param[j])
+                 for(int k=row-1; k >= 0; k--)
+                   if(song.pattern[song.pattern_id][channel][k].note) {
+                     song.pattern[song.pattern_id][channel][k].slur = 1;
+                     break;
+                   }
+               break;
+
+             case FX_SLUR_UP:
+               note.slur = 1;
+               *next_note = make_note(note.octave, note.note, note.instrument);
+               shift_semitones(next_note, note.param[j]&15);
+               break;
+             case FX_SLUR_DN:
+               note.slur = 1;
+               *next_note = make_note(note.octave, note.note, note.instrument);
+               shift_semitones(next_note, -(note.param[j]&15));
+               break;
+
+             case FX_TEMPO:
+               // to do
+               break;
+             case FX_LOOP:
+               song.loop_to = note.param[j];
+               goto pattern_cut;
+             case FX_FINE:
+               song.loop_to = -1;
+             case FX_PAT_CUT:
+             pattern_cut:
+               song.pattern_length[song.pattern_id][channel] = row+1;
            }
          }
 
@@ -472,7 +521,7 @@ int main(int argc, char *argv[]) {
 
     else if(starts_with(buffer, "COLUMNS ", &arg)) {
       arg = skip_to_number(arg);
-      for(i=0;*arg;i++)
+      for(i=0;*arg && (i < CHANNEL_COUNT);i++)
         song.effect_columns[i] = strtol(arg, &arg, 10);
     }
 
