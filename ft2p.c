@@ -126,8 +126,10 @@ ftnote make_note(uint8_t octave, char note, char instrument) {
 void shift_semitones(ftnote *note, int offset) {
   if(!isalpha(note->note))
     return;
+  // convert the note to a number, so we can just add an offset to it
   int semitone = (strchr(scale, note->note)-scale)+(note->octave*NUM_SEMITONES);
   semitone += offset;
+  // convert the number back to a note name and octave
   note->note = scale[semitone % NUM_SEMITONES];
   note->octave = semitone / NUM_SEMITONES;
 }
@@ -198,6 +200,7 @@ char *sanitize_name(char *outbuf, const char *input, int length) {
 
 // return 1 iff a string starts with another specific string
 int starts_with(char *string, const char *start, char **arg) {
+  // also set a pointer to the text after "start"
   if(arg)
     *arg = string+strlen(start);
   return !memcmp(string, start, strlen(start));
@@ -447,7 +450,7 @@ int main(int argc, char *argv[]) {
          if(line[2] != '.') {
            // sharp note are uppercase
            note.note = (line[3]=='#')?toupper(line[2]):tolower(line[2]);
-           // octave will be garbage for note cut
+           // octave will be garbage for note cuts, but that's OK
            note.octave = line[4]-'0';
 
            // read instrument if it's there
@@ -469,15 +472,16 @@ int main(int argc, char *argv[]) {
 
          // read effects
          for(j=0; j<song.effect_columns[channel]; j++) {
+           // read in the effect type and value
            char *effect = line+11;
            note.effect[j] = *effect;
            note.param[j]  = strtol(effect+1, NULL, 16);
 
+           // some effects call for processing during pattern reading
            ftnote *next_note = &song.pattern[song.pattern_id][channel][row+1];
-
            switch(*effect) {
              case FX_DELAYCUT: // fix for delaying a cut on an empty row
-               if(!note.note)
+               if(!note.note)  // (which I don't think works yet??)
                  note.note = '~';
                break;
              case FX_SLUR:
@@ -488,6 +492,7 @@ int main(int argc, char *argv[]) {
                      break;
                    }
                break;
+             // mark the note as a slur and make the note to slur into
              case FX_SLUR_UP:
                note.slur = 1;
                *next_note = make_note(note.octave, note.note, note.instrument);
@@ -498,6 +503,7 @@ int main(int argc, char *argv[]) {
                *next_note = make_note(note.octave, note.note, note.instrument);
                shift_semitones(next_note, -(note.param[j]&15));
                break;
+             // loops, pattern cuts and fines all reduce the length of the pattern
              case FX_LOOP:
                song.loop_to = note.param[j];
                goto pattern_cut;
@@ -509,15 +515,19 @@ int main(int argc, char *argv[]) {
            }
          }
 
+         // finally write the not we made into the pattern
          song.pattern[song.pattern_id][channel][row] = note;
       }
 
     }
+
+    // comments are used for song metadata
     else if(starts_with(buffer, "COMMENT ", &arg)) {
       remove_line_ending(buffer, '\r');
       if(*arg == '\"')
         arg++;
       char *arg2;
+      // import another file into this file
       if(starts_with(arg, "include ", &arg2)) {
         FILE *included = fopen(arg2, "rb");
         if(!included)
@@ -528,6 +538,7 @@ int main(int argc, char *argv[]) {
             fputc(c, output_file);
         }
         fclose(included);
+      // drum = assign a drum to a DPCM note
       } else if(starts_with(arg, "drum ", &arg2)) {
         char *note = strchr(scale, arg2[0]);
         if(!note)
