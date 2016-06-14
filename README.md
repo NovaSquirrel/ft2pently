@@ -23,6 +23,10 @@ Supported effects:
 * Qxy - play note for one row then slur up Y semitones
 * Rxy - play note for one row then slur down Y semitones
 
+Things to keep in mind:
+* The default duty for square channels is 50%, not 12.5%
+* An instrument's envelope will only last as long as the volume envelope
+
 -----
 
 Meta information is sent to the converter via comments:
