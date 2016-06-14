@@ -11,10 +11,17 @@ As with the other music engines that offer conversions from Famitracker, compose
 Most effects are unsupported, as is the volume column and "pitch" and "hi-pitch" envelopes.
 
 Supported effects:
-* 0xx - arpeggio
-* Bxx - set loop point
+* 0xy - arpeggio
+* Bxx - set loop point (loop to frame xx)
 * Cxx - stop song
 * Dxx - pattern cut (xx ignored, always zero)
+* Fxx - tempo/speed change
+* Gxx - delay note start
+* Sxx - delay note cut (not usable on empty rows yet)
+* 300 - disable slur
+* 3xx - enable slur (if x is nonzero)
+* Qxy - play note for one row then slur up Y semitones
+* Rxy - play note for one row then slur down Y semitones
 
 -----
 
