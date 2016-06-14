@@ -74,7 +74,7 @@ enum {
   FX_SLUR_UP  = 'Q', // note for one row, slur into pitch X semitones up
   FX_SLUR_DN  = 'R', // note for one row, slur into pitch X semitones down
   FX_DELAYCUT = 'S', // grace note for X frames then rest
-  FX_ATTACK_ON= 'H'  // repurposed to specify attack target
+  FX_ATTACK_ON= 'J'  // repurposed to specify attack target
 };
 
 // a note on a pattern
@@ -317,7 +317,7 @@ void write_pattern(FILE *file, int id, int channel) {
     int duration = next-row;
 
     // write any instrument changes
-    if(pattern[row].instrument != instrument) {
+    if(pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
       instrument = pattern[row].instrument;
       fprintf(file, " @%s ", instrument_name[instrument]);
     }
@@ -649,7 +649,7 @@ int main(int argc, char *argv[]) {
         int min_length = MAX_ROWS; // minimum pattern length in this frame
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = song.frame[i][j];
-          if(j != CH_NOISE && j != CH_ATTACK && song.pattern_used[pattern][j]) {
+          if(j != CH_NOISE && song.pattern_used[pattern][j]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) { // stop channel if it was playing but now it isn't
@@ -662,7 +662,7 @@ int main(int argc, char *argv[]) {
 
         // look for tempo changes
         for(int row=0; row<min_length; row++) {
-          int speed = 0, tempo = 0;
+          int speed = 0, tempo = 0, attack=-1;
           for(int j=0; j<CHANNEL_COUNT; j++) {
             int pattern = song.frame[i][j];
             ftnote *note = &song.pattern[pattern][j][row];
@@ -672,13 +672,21 @@ int main(int argc, char *argv[]) {
                   speed = note->param[fx];
                 else
                   tempo = note->param[fx];
-              }
+              } else if(note->effect[fx] == FX_ATTACK_ON)
+                attack = note->param[fx];
           }
-          if(speed||tempo) {
-            fprintf(output_file, "\r\n  at ");
-            write_time(output_file, total_rows+row);
-            fprintf(output_file, "\r\n");
-            write_tempo(output_file, speed?speed:song.speed, tempo?tempo:song.tempo);
+          if(speed||tempo||(attack>=0)) {
+            if(row) {
+              fprintf(output_file, "\r\n  at ");
+              write_time(output_file, total_rows+row);
+            }
+            if(speed||tempo) {
+              fprintf(output_file, "\r\n");
+              write_tempo(output_file, speed?speed:song.speed, tempo?tempo:song.tempo);
+            }
+            if(attack>=0) {
+              fprintf(output_file, "\r\n  attack on %s", chan_name[attack]);
+            }
           }
         }
         total_rows += min_length;
