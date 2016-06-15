@@ -214,7 +214,7 @@ char *skip_to_number(char *string) {
 }
 
 //////////////////// global variables ////////////////////
-ftsong song;
+ftsong song, xsong;
 int song_num = 0;
 char instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
 char instrument_used[MAX_INSTRUMENTS];
@@ -287,12 +287,12 @@ void write_pattern(FILE *file, int id, int channel) {
   if(channel == CH_NOISE) // noise not implemented yet
     return;
 
-  ftnote *pattern = song.pattern[id][channel];
+  ftnote *pattern = xsong.pattern[id][channel];
   int i, slur = 0, delay_cut = 0;
 
   // find the instrument used for the pattern
   int instrument = -1;
-  for(i=0; i<song.rows; i++)
+  for(i=0; i<xsong.rows; i++)
     if(pattern[i].instrument >= 0) {
       instrument = pattern[i].instrument;
       break;
@@ -305,12 +305,12 @@ void write_pattern(FILE *file, int id, int channel) {
   fprintf(file, "\r\n    ");
 
   int row = 0;
-  while(row < song.pattern_length[id][channel]) {
+  while(row < xsong.pattern_length[id][channel]) {
     char this_note = pattern[row].note;
     int next, octave = pattern[row].octave;
 
     // find the next note
-    for(next = row+1; next < song.pattern_length[id][channel]; next++)
+    for(next = row+1; next < xsong.pattern_length[id][channel]; next++)
       if(pattern[next].note)
         break;
     // the distance between this note and the next note is the duration
@@ -401,13 +401,16 @@ int main(int argc, char *argv[]) {
   fprintf(output_file, "durations stick\r\nnotenames english\r\n");
 
   // process each line
-  int need_song_export = -1, need_instrument_export = 1;
+  int need_song_export = 0;
   while(fgets(buffer, sizeof(buffer), input_file)) {
     char *arg;
     remove_line_endings(buffer);
 
     if(starts_with(buffer, "TRACK ", &arg)) {
-      need_song_export++;
+      if(song_num) {
+        need_song_export = 1;
+        xsong = song;
+      }
       song_num++;
       memset(&song, 0, sizeof(song));
       song.rows = strtol(arg, &arg, 10);
@@ -596,42 +599,40 @@ int main(int argc, char *argv[]) {
 
     // export things if needed
     if(!strcmp(buffer, "# End of export")) {
-      if(need_instrument_export) {
-        need_instrument_export = 0;
-        for(i=0; i<MAX_INSTRUMENTS; i++)
-          if(instrument_used[i]) {
-            fprintf(output_file, "\r\ninstrument %s\r\n", instrument_name[i]);
-            if(instrument[i][MS_VOLUME] >= 0) {
-              fprintf(output_file, "  volume ");
-              write_macro(output_file, &instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]]);
-            }
-            if(instrument[i][MS_DUTY] >= 0) {
-              fprintf(output_file, "  timbre ");
-              write_macro(output_file, &instrument_macro[MS_DUTY][(unsigned)instrument[i][MS_DUTY]]);
-            }
-            if(instrument[i][MS_ARPEGGIO] >= 0) {
-              fprintf(output_file, "  pitch ");
-              write_macro(output_file, &instrument_macro[MS_ARPEGGIO][(unsigned)instrument[i][MS_ARPEGGIO]]);
-            }
+      xsong = song;
+      for(i=0; i<MAX_INSTRUMENTS; i++)
+        if(instrument_used[i]) {
+          fprintf(output_file, "\r\ninstrument %s\r\n", instrument_name[i]);
+          if(instrument[i][MS_VOLUME] >= 0) {
+            fprintf(output_file, "  volume ");
+            write_macro(output_file, &instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]]);
           }
-      }
+          if(instrument[i][MS_DUTY] >= 0) {
+            fprintf(output_file, "  timbre ");
+            write_macro(output_file, &instrument_macro[MS_DUTY][(unsigned)instrument[i][MS_DUTY]]);
+          }
+          if(instrument[i][MS_ARPEGGIO] >= 0) {
+            fprintf(output_file, "  pitch ");
+            write_macro(output_file, &instrument_macro[MS_ARPEGGIO][(unsigned)instrument[i][MS_ARPEGGIO]]);
+          }
+        }
       need_song_export = 1;
     }
-    if(need_song_export == 1) {
-      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", song.name);
-      write_tempo(output_file, song.speed, song.tempo);
+    if(need_song_export) {
+      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", xsong.name);
+      write_tempo(output_file, xsong.speed, xsong.tempo);
       fprintf(output_file, "\r\n");
 
       // write the actually used (not empty) patterns
       for(j=0; j<CHANNEL_COUNT; j++)
         for(i=0; i<MAX_PATTERNS; i++) {
           int not_empty = 0;
-          for(int row = 0; row < song.rows; row++)
-            if(isalpha(song.pattern[i][j][row].note)) {
+          for(int row = 0; row < xsong.rows; row++)
+            if(isalpha(xsong.pattern[i][j][row].note)) {
               not_empty = 1;
               break;
             }
-          song.pattern_used[i][j] = not_empty;
+          xsong.pattern_used[i][j] = not_empty;
 
           if(not_empty)
             write_pattern(output_file, i, j);
@@ -640,32 +641,32 @@ int main(int argc, char *argv[]) {
       // write the frames
       int channel_playing[CHANNEL_COUNT] = {0, 0, 0, 0, 0, 0};
       int total_rows = 0;
-      for(i=0; i<song.frames; i++) {
+      for(i=0; i<xsong.frames; i++) {
         fprintf(output_file, "\r\n  at ");;
         write_time(output_file, total_rows);
-        if(song.loop_to == i && song.loop_to)
+        if(xsong.loop_to == i && xsong.loop_to)
           fprintf(output_file, "\r\n  segno");
 
         int min_length = MAX_ROWS; // minimum pattern length in this frame
         for(j=0; j<CHANNEL_COUNT; j++) {
-          int pattern = song.frame[i][j];
-          if(j != CH_NOISE && song.pattern_used[pattern][j]) {
+          int pattern = xsong.frame[i][j];
+          if(j != CH_NOISE && xsong.pattern_used[pattern][j]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) { // stop channel if it was playing but now it isn't
             fprintf(output_file, "\r\n  stop %s", chan_name[j]);
             channel_playing[j] = 0;
           }
-          if(song.pattern_length[pattern][j] < min_length)
-            min_length = song.pattern_length[pattern][j];
+          if(xsong.pattern_length[pattern][j] < min_length)
+            min_length = xsong.pattern_length[pattern][j];
         }
 
         // look for tempo changes
         for(int row=0; row<min_length; row++) {
           int speed = 0, tempo = 0, attack=-1;
           for(int j=0; j<CHANNEL_COUNT; j++) {
-            int pattern = song.frame[i][j];
-            ftnote *note = &song.pattern[pattern][j][row];
+            int pattern = xsong.frame[i][j];
+            ftnote *note = &xsong.pattern[pattern][j][row];
             for(int fx=0; fx<MAX_EFFECTS; fx++)
               if(note->effect[fx] == FX_TEMPO) {
                 if(note->param[fx] < 0x20)
@@ -682,7 +683,7 @@ int main(int argc, char *argv[]) {
             }
             if(speed||tempo) {
               fprintf(output_file, "\r\n");
-              write_tempo(output_file, speed?speed:song.speed, tempo?tempo:song.tempo);
+              write_tempo(output_file, speed?speed:xsong.speed, tempo?tempo:xsong.tempo);
             }
             if(attack>=0) {
               fprintf(output_file, "\r\n  attack on %s", chan_name[attack]);
@@ -694,7 +695,7 @@ int main(int argc, char *argv[]) {
       fprintf(output_file, "\r\n  at ");
       write_time(output_file, total_rows);
       fprintf(output_file, "\r\n  ");
-      if(song.loop_to != -1)
+      if(xsong.loop_to != -1)
         fprintf(output_file, "dal segno");
       else
         fprintf(output_file, "fine");
