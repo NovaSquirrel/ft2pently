@@ -29,6 +29,14 @@ Things to keep in mind:
 
 -----
 
+Attack channel:
+
+Pently supports sharing one channel between two different patterns. To use it in ft2pently, set the module to MMC5 and puts notes on the first square channel. To specify what channel is being interrupted by the attack, use the Jxx effect, with 0 for the first square channel, 1 for the second square channel, or 2 for the triangle channel.
+
+The channel being interrupted should be on a sustain by the time the the attack happens, because it won't resume the previous attack.
+
+-----
+
 Meta information is sent to the converter via comments:
 ```
 include drums.pently
