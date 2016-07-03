@@ -10,17 +10,18 @@ As with the other music engines that offer conversions from Famitracker, compose
 Most effects are unsupported, as is the volume column and "pitch" and "hi-pitch" envelopes.
 
 Supported effects:
-* 0xy - arpeggio
-* Bxx - set loop point (loop to frame xx)
-* Cxx - stop song
-* Dxx - pattern cut (xx ignored, always zero)
-* Fxx - tempo/speed change
-* Gxx - delay note start
-* Sxx - delay note cut (not usable on empty rows yet)
-* 300 - disable slur
-* 3xx - enable slur (if x is nonzero)
-* Qxy - play note for one row then slur up Y semitones
-* Rxy - play note for one row then slur down Y semitones
+* 0xy - Arpeggio
+* Bxx - Set loop point (loop to frame xx)
+* Cxx - Stop song
+* Dxx - Pattern cut (xx ignored, always zero)
+* Fxx - Tempo/speed change
+* Gxx - Delay note start
+* Sxx - Delay note cut (not usable on empty rows yet)
+* 300 - Disable slur
+* 3xx - Enable slur (if x is nonzero)
+* 4xy - Vibrato of depth Y. X (speed) is ignored. Valid depths are 0 through 4, where 4 is very strong and 0 is disabled.
+* Qxy - Play note for one row then slur up Y semitones
+* Rxy - Play note for one row then slur down Y semitones
 
 Things to keep in mind:
 * Always define a duty envelope for square instruments, even if it's 12.5%. In Pently, an unspecified duty cycle is 50%, so a duty envelope needs to be defined.
