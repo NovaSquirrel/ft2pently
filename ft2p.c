@@ -547,12 +547,17 @@ int main(int argc, char *argv[]) {
         fclose(included);
       // drum = assign a drum to a DPCM note
       } else if(starts_with(arg, "drum ", &arg2)) {
-        char *note = strchr(scale, arg2[0]);
+        char *note = strchr(scale, tolower(arg2[0]));
         if(!note)
           die("invalid note in scale");
-        int octave = arg2[1]-'0';
+        char *octave_ptr = arg2+1;
+        if(*octave_ptr == '#') 
+          note++;
+        if(!isdigit(*octave_ptr))
+          octave_ptr++;
+        int octave = *octave_ptr-'0';
         check_range("drum octave", octave, 0, NUM_OCTAVES);
-        strlcpy(drum_name[octave][note-scale], arg2+3, 16);
+        strlcpy(drum_name[octave][note-scale], octave_ptr+2, 16);
       }
     }
 
