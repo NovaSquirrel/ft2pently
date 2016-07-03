@@ -36,7 +36,7 @@
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
-const char *supported_effects = "03GQRS";
+const char *supported_effects = "034GQRS";
 const char *conductor_effects = "BCDF";
 const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "drum", "attack"};
 
@@ -66,6 +66,7 @@ enum {
   FX_NONE     = 0, 
   FX_ARP      = '0', // arpeggio
   FX_SLUR     = '3', // enable slur if nonzero
+  FX_VIBRATO  = '4', // vibrato change
   FX_LOOP     = 'B', // jump to frame X
   FX_FINE     = 'C', // stop song
   FX_PAT_CUT  = 'D', // skip to next pattern
@@ -330,6 +331,9 @@ void write_pattern(FILE *file, int id, int channel) {
           break;
         case FX_ARP:
           fprintf(file, "@EN%.2x ", pattern[row].param[i]);
+          break;
+        case FX_VIBRATO:
+          fprintf(file, "@MP%x ", pattern[row].param[i] & 15);
           break;
         case FX_DELAY:
           fprintf(file, "r%ig ", pattern[row].param[i]);
