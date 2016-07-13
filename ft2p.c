@@ -33,6 +33,7 @@
 #define MAX_OCTAVE      7
 #define NUM_OCTAVES     7
 #define NUM_SEMITONES   12
+#define MAX_SFX         64
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
@@ -61,6 +62,13 @@ enum {
   MACRO_SET_COUNT
 };
 
+// arpeggio types
+enum {
+  ARP_ABSOLUTE,
+  ARP_RELATIVE,
+  ARP_FIXED
+};
+
 // supported note effects
 enum {
   FX_NONE     = 0, 
@@ -77,6 +85,12 @@ enum {
   FX_DELAYCUT = 'S', // grace note for X frames then rest
   FX_ATTACK_ON= 'J'  // repurposed to specify attack target
 };
+
+// a sound effect definition, held onto until 
+typedef struct soundeffect {
+  uint8_t instrument, channel;
+  char name[64];
+} soundeffect;
 
 // a note on a pattern
 typedef struct ftnote {
@@ -109,6 +123,7 @@ typedef struct ftsong {
 // an instument envelope
 typedef struct ftmacro {
   uint8_t length, loop, release;
+  char arp_type;
   char sequence[MAX_MACRO_LEN];
 } ftmacro;
 
@@ -123,16 +138,26 @@ ftnote make_note(uint8_t octave, char note, char instrument) {
   return new_note;
 }
 
+int note_to_semitone(char note, int octave) {
+  return (strchr(scale, note)-scale)+(octave*NUM_SEMITONES);
+}
+
+void semitone_to_note(int semitone, char *note, uint8_t *octave) {
+  // convert the number back to a note name and octave
+  *note = scale[semitone % NUM_SEMITONES];
+  *octave = semitone / NUM_SEMITONES;
+}
+
 // offsets a note by a given number of semitones
 void shift_semitones(ftnote *note, int offset) {
   if(!isalpha(note->note))
     return;
-  // convert the note to a number, so we can just add an offset to it
-  int semitone = (strchr(scale, note->note)-scale)+(note->octave*NUM_SEMITONES);
-  semitone += offset;
-  // convert the number back to a note name and octave
-  note->note = scale[semitone % NUM_SEMITONES];
-  note->octave = semitone / NUM_SEMITONES;
+  // convert to semitones so I can just shift the integer value
+  int semitones = note_to_semitone(note->note, note->octave);
+  // add to the integer value
+  semitones += offset;
+  // change back to a note
+  semitone_to_note(semitones, &note->note, &note->octave);
 }
 
 // shows an error and stops the program
@@ -216,13 +241,14 @@ char *skip_to_number(char *string) {
 
 //////////////////// global variables ////////////////////
 ftsong song, xsong;
-int song_num = 0;
+int song_num = 0, sfx_num = 0;
 char instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
 char instrument_used[MAX_INSTRUMENTS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
 const char *in_filename, *out_filename;
 char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
+soundeffect soundeffects[MAX_SFX];
 
 // writes the numbers for an instrument's envelope, including the loop point
 void write_macro(FILE *file, ftmacro *macro) {
@@ -233,6 +259,53 @@ void write_macro(FILE *file, ftmacro *macro) {
     fprintf(file, "%i ", macro->sequence[i]);
   }
   fprintf(file, "\r\n");
+}
+
+// writes an octave using ' and ,
+void write_octave(FILE *file, int octave) {
+  int i;
+  if(octave > 2)
+    for(i=2; i!= octave; i++)
+      fputc('\'', file);
+  if(octave < 2)
+    for(i=2; i!= octave; i--)
+      fputc(',', file);
+}
+
+// writes an instrument's envelopes
+void write_instrument(FILE *file, int i, int absolute_pitch) {
+  if(instrument[i][MS_VOLUME] >= 0) {
+    fprintf(file, "  volume ");
+    write_macro(file, &instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]]);
+  }
+  if(instrument[i][MS_DUTY] >= 0) {
+    fprintf(file, "  timbre ");
+    write_macro(file, &instrument_macro[MS_DUTY][(unsigned)instrument[i][MS_DUTY]]);
+  }
+  if(instrument[i][MS_ARPEGGIO] >= 0) {
+    ftmacro *macro = &instrument_macro[MS_ARPEGGIO][(unsigned)instrument[i][MS_ARPEGGIO]];
+    fprintf(file, "  pitch ");
+
+    if(absolute_pitch) { // Pently sfx pitch envelopes require music notes, not semitone numbers
+      int j;
+      for(j=0; j<macro->length; j++) {
+        if(j == macro->loop)
+          fprintf(file, "| ");
+        // convert to note
+        int semitones = macro->sequence[j];
+        char note;
+        uint8_t octave;
+        semitone_to_note(semitones, &note, &octave);
+        // print it
+        fprintf(file, "%c%s", tolower(note), isupper(note)?"#":"");
+        write_octave(file, octave);
+        fputc(' ', file);
+      }
+      fprintf(file, "\r\n");
+    } else {
+      write_macro(file, macro);
+    }
+  }
 }
 
 // converts the number of rows to a Pently note duration
@@ -353,12 +426,7 @@ void write_pattern(FILE *file, int id, int channel) {
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
 
       // shift the octave in the direction needed
-      if(octave > 2)
-        for(i=2; i!= octave; i++)
-          fputc('\'', file);
-      if(octave < 2)
-        for(i=2; i!= octave; i--)
-          fputc(',', file);
+      write_octave(file, octave);
     } else { // DPCM
       char *scale_note = strchr(scale, this_note);
       fprintf(file, "%s", drum_name[octave][scale_note-scale]);
@@ -382,6 +450,7 @@ int main(int argc, char *argv[]) {
   memset(&instrument_macro, 0, sizeof(instrument_macro));
   memset(&instrument_name, 0, sizeof(instrument_name));
   memset(&drum_name, 0, sizeof(drum_name));
+  memset(&soundeffects, 0, sizeof(soundeffects));
 
   // read arguments
   for(i=1; i<argc; i++) {
@@ -545,6 +614,30 @@ int main(int argc, char *argv[]) {
             fputc(c, output_file);
         }
         fclose(included);
+      // define a sound effect using an instrument
+      } else if(starts_with(arg, "sfx ", &arg2)) {
+        soundeffects[sfx_num].instrument = strtol(arg2, &arg2, 16);
+        // skip to channel
+        while(*arg2 == ' ')
+          arg2++;
+        // select the channel
+        char channel = *(arg2++);
+        if(channel == 's')
+          channel = CH_SQUARE1;
+        else if(channel == 'n')
+          channel = CH_NOISE;
+        else if(channel == 't')
+          channel = CH_TRIANGLE;
+        soundeffects[sfx_num].channel = channel;
+
+        // skip to name
+        while(*arg2 == ' ')
+          arg2++;
+        strlcpy(soundeffects[sfx_num].name, arg2, 64);
+        sfx_num++;
+      // define a drum using sound effects
+      } else if(starts_with(arg, "drumsfx ", &arg2)) {
+        fprintf(output_file, "drum %s\r\n", arg2);
       // drum = assign a drum to a DPCM note
       } else if(starts_with(arg, "drum ", &arg2)) {
         char *note = strchr(scale, tolower(arg2[0]));
@@ -575,7 +668,7 @@ int main(int argc, char *argv[]) {
       instrument_macro[setting][id].loop = strtol(arg, &arg, 10);
       instrument_macro[setting][id].release = strtol(arg, &arg, 10);
       instrument_macro[setting][id].length = 0;
-      strtol(arg, &arg, 10); // skip unknown number
+      instrument_macro[setting][id].arp_type = strtol(arg, &arg, 10);;
       arg = skip_to_number(arg);
 
       // read all the numbers and count them
@@ -609,21 +702,21 @@ int main(int argc, char *argv[]) {
     // export things if needed
     if(!strcmp(buffer, "# End of export")) {
       xsong = song;
+      // write sound effects
+      for(i=0; i<sfx_num; i++) {
+        int instrument = soundeffects[i].instrument, channel = soundeffects[i].channel;
+        // sound effects don't like being put on "pulse1" so replace it with "pulse"
+        const char *channel_name = chan_name[channel];
+        if(channel == CH_SQUARE1)
+          channel_name = "pulse";
+        fprintf(output_file, "\r\nsfx %s on %s\r\n", soundeffects[i].name, channel_name);
+        write_instrument(output_file, instrument, channel != CH_NOISE);
+      }
+      // write instruments
       for(i=0; i<MAX_INSTRUMENTS; i++)
         if(instrument_used[i]) {
           fprintf(output_file, "\r\ninstrument %s\r\n", instrument_name[i]);
-          if(instrument[i][MS_VOLUME] >= 0) {
-            fprintf(output_file, "  volume ");
-            write_macro(output_file, &instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]]);
-          }
-          if(instrument[i][MS_DUTY] >= 0) {
-            fprintf(output_file, "  timbre ");
-            write_macro(output_file, &instrument_macro[MS_DUTY][(unsigned)instrument[i][MS_DUTY]]);
-          }
-          if(instrument[i][MS_ARPEGGIO] >= 0) {
-            fprintf(output_file, "  pitch ");
-            write_macro(output_file, &instrument_macro[MS_ARPEGGIO][(unsigned)instrument[i][MS_ARPEGGIO]]);
-          }
+          write_instrument(output_file, i, 0);
         }
       need_song_export = 1;
     }

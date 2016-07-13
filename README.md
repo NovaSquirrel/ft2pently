@@ -38,7 +38,7 @@ The channel being interrupted must be at the end of its volume envelope by the t
 
 Drums
 -----
-Pently's drum implementation plays a sound effect on up to two channels, which has no direct representation in Famitracker. In a later version of ft2pently you will be able to choose to automatically convert the noise track into drums, but currently you must use the DPCM channel.
+Pently's drum implementation plays a sound effect on up to two channels. In a later version of ft2pently you will be able to choose to automatically convert the noise track into drums, but currently you must use the DPCM channel.
 
 Set up the DPCM instrument as you usually would, with samples assigned to different notes. The samples aren't actually used in the conversion, but will let you hear what the drum section of the song sounds like while composing it.
 
@@ -58,6 +58,24 @@ drum d3 clhat
 `include` reads another file and dumps it right into the output file along with the conversion, for sound effects and drums and such. Here it is including the drum definitions.
 
 `drum` specifies that a given DPCM channel note and octave corresponds to a given drum in Pently. Here, C, C# and D in octave 3 are used.
+
+Converting instruments to drums
+-------------------------------
+
+Instead of importing drums, you can define drums using instruments. The DPCM channel must still be used as described in the previous section. As stated above, drums consist of one or two sound effects. For the arpeggio envelope, used the `fixed` type.
+
+```
+sfx 01 t tri_kick
+sfx 02 n noise_kick
+drumsfx kick tri_kick noise_kick
+drum c3 tkick
+```
+
+`sfx` defines a new sound effect. It takes an instrument number (hexadecimal), a channel (s, t or n for square/pulse, triangle, or noise respectively), and a name to give the new sound effect (alphanumeric and underscores only).
+
+`drumsfx` defines a new drum, using one or two sound effects. It takes the drum name, and then the names of the sound effect(s) used. Same naming restrictions.
+
+`drum` works as before.
 
 Converting the song
 -------------------
