@@ -391,7 +391,7 @@ void write_pattern(FILE *file, int id, int channel) {
     int duration = next-row;
 
     // write any instrument changes
-    if(pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
+    if(isalpha(this_note) && pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
       instrument = pattern[row].instrument;
       fprintf(file, " @%s ", instrument_name[instrument]);
     }
@@ -530,7 +530,7 @@ int main(int argc, char *argv[]) {
            note.octave = line[4]-'0';
 
            // read instrument if it's there
-           if(line[6] != '.') {
+           if(isalpha(note.note) && line[6] != '.') { // will have to change isalpha for eventual noise track support
              note.instrument = strtol(line+6, NULL, 16);
              check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS);
              instrument_used[(unsigned)note.instrument] = 1;
