@@ -29,11 +29,14 @@
 #define MAX_FRAMES      32   // real max is 128
 #define MAX_PATTERNS    32   // real max is 128
 #define MAX_INSTRUMENTS 64   // pently limit is 256/5
-#define MAX_MACRO_LEN   128  // real max is like, 254?
+#define MAX_MACRO_LEN   255  // real max is like 254?
 #define MAX_OCTAVE      7
 #define NUM_OCTAVES     7
 #define NUM_SEMITONES   12
 #define MAX_SFX         64
+#define MAX_DECAY_START 15   // starting volume
+#define MAX_DECAY_RATE  16   // decay rate
+#define MAX_DECAY_LEN   256  // actually goes up to 224 or something but this is to be safe
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
@@ -125,6 +128,7 @@ typedef struct ftmacro {
   uint8_t length, loop, release;
   char arp_type;
   char sequence[MAX_MACRO_LEN];
+  char decay_rate; // if 0, decay isn't used
 } ftmacro;
 
 //////////////////// functions ////////////////////
@@ -209,7 +213,7 @@ char *sanitize_name(char *outbuf, const char *input, int length) {
   while(*input) {
     if(isalnum(*input))    // copy directly if alphanumeric
       *(output++) = *input;
-    else if(*input == ' ' || *input == '-') {
+    else if(*input == ' ' || *input == '-' || *input == '_') {
       *(output++) = '_';
     } else {               // escape it otherwise
       sprintf(hex, "%.2x", *input);
@@ -249,6 +253,8 @@ char instrument_name[MAX_INSTRUMENTS][32];
 const char *in_filename, *out_filename;
 char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
+int decay_enabled = 0;
+char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
 
 // writes the numbers for an instrument's envelope, including the loop point
 void write_macro(FILE *file, ftmacro *macro) {
@@ -277,6 +283,10 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
   if(instrument[i][MS_VOLUME] >= 0) {
     fprintf(file, "  volume ");
     write_macro(file, &instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]]);
+
+    int decay = instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]].decay_rate;
+    if(decay)
+      fprintf(file, "  decay %i\r\n", decay);
   }
   if(instrument[i][MS_DUTY] >= 0) {
     fprintf(file, "  timbre ");
@@ -614,6 +624,22 @@ int main(int argc, char *argv[]) {
             fputc(c, output_file);
         }
         fclose(included);
+      // generate decay tables
+      } else if(strcmp(arg, "auto decay")) {
+        decay_enabled = 1;
+        for(i=0;i<MAX_DECAY_START;i++)
+          for(j=0;j<MAX_DECAY_RATE;j++) {
+            int volume = (i+1)<<4;
+            int value, index = 0, decay = j+1;
+            
+            while(volume >= 0x10) {
+              volume -= decay;
+              value = ((volume+8)>>4);
+              decay_envelope[i][j][index++] = value;
+            }
+            if(value != 0)
+              decay_envelope[i][j][index++] = 0;
+          }
       // define a sound effect using an instrument
       } else if(starts_with(arg, "sfx ", &arg2)) {
         soundeffects[sfx_num].instrument = strtol(arg2, &arg2, 16);
@@ -665,10 +691,10 @@ int main(int argc, char *argv[]) {
       check_range("macro setting type", setting, 0, MACRO_SET_COUNT);
       int id = strtol(arg, &arg, 10);
       check_range("macro id", id, 0, MAX_INSTRUMENTS);
-      instrument_macro[setting][id].loop = strtol(arg, &arg, 10);
+      instrument_macro[setting][id].loop = strtol(arg, &arg, 10);    // -1 gets set as 255
       instrument_macro[setting][id].release = strtol(arg, &arg, 10);
       instrument_macro[setting][id].length = 0;
-      instrument_macro[setting][id].arp_type = strtol(arg, &arg, 10);;
+      instrument_macro[setting][id].arp_type = strtol(arg, &arg, 10);
       arg = skip_to_number(arg);
 
       // read all the numbers and count them
@@ -677,6 +703,27 @@ int main(int argc, char *argv[]) {
         if(instrument_macro[setting][id].length >= MAX_MACRO_LEN)
           die("instrument macro too long");
       }
+
+      // if auto decay is enabled and this is a volume envelope, try to find a decay envelope
+      if(decay_enabled && setting == MS_VOLUME && instrument_macro[setting][id].loop == 255 &&
+        !instrument_macro[setting][id].sequence[instrument_macro[setting][id].length-1]) {
+
+        int stop = 0;
+        int length_envelope = instrument_macro[setting][id].length-1;     // length in bytes, including the zero so -1
+        for(i=MAX_DECAY_START-1;i>=2 && !stop; i--)                       // try starting volumes in reverse order
+          for(j=0; j<MAX_DECAY_RATE && !stop; j++) {
+            int length_decay = strlen(decay_envelope[i][j]);              // length in bytes, not including zero
+
+            int start_offset = length_envelope - length_decay;            // end of the envelope, backed up to where the decay would start
+            if(!memcmp(instrument_macro[setting][id].sequence + start_offset, decay_envelope[i][j], length_decay)) {
+              instrument_macro[setting][id].sequence[start_offset] = i+1; // set last volume to starting volume
+              instrument_macro[setting][id].length = start_offset+1;      // cut off the rest of the envelope
+              instrument_macro[setting][id].decay_rate = j+1;
+              stop = 1;                                                   // break out of the loop
+            }
+          }
+      }
+
     }
 
     else if(starts_with(buffer, "INST2A03 ", &arg)) {
