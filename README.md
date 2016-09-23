@@ -62,7 +62,7 @@ drum d3 clhat
 Converting instruments to drums
 -------------------------------
 
-Instead of importing drums, you can define drums using instruments. The DPCM channel must still be used as described in the previous section. As stated above, drums consist of one or two sound effects. For the arpeggio envelope, used the `fixed` type.
+Instead of importing drums, you can define drums using instruments. The DPCM channel must still be used as described in the previous section. As stated above, drums consist of one or two sound effects. For the arpeggio envelope, use the `fixed` type.
 
 ```
 sfx 01 t tri_kick
@@ -76,6 +76,14 @@ drum c3 tkick
 `drumsfx` defines a new drum, using one or two sound effects. It takes the drum name, and then the names of the sound effect(s) used. Same naming restrictions.
 
 `drum` works as before.
+
+Auto decay
+----------
+Pently can split an instrument into "attack" and "decay" sections, with the attack being a Famitracker-ish volume envelope and the decay being a linear slope down towards silence. This saves space, as a long fadeout at the end of an instrument does not need to be in the ROM.
+
+To use this feature, add a line containing "auto decay" to the .ftm's comments.
+Use my [decay envelope generator page](http://t.novasquirrel.com/test/decay.html) to create a decay envelope, and then paste the generated envelope onto the end of a volume envelope.
+A volume envelope may contain a decay and nothing else, if you don't want to use an attack.
 
 Converting the song
 -------------------
