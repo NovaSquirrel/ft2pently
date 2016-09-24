@@ -85,6 +85,8 @@ To use this feature, add a line containing "auto decay" to the .ftm's comments.
 Use my [decay envelope generator page](http://t.novasquirrel.com/test/decay.html) to create a decay envelope, and then paste the generated envelope onto the end of a volume envelope.
 A volume envelope may contain a decay and nothing else, if you don't want to use an attack.
 
+Important note: Auto decay will not activate for a given instrument if it would interfere with the duty and/or arpeggio envelopes. At the point in the volume envelope where the decay envelope starts, the duty and arpeggio envelopes must have already completed. This also means that those envelopes cannot be looped.
+
 Converting the song
 -------------------
 In Famitracker, either use `File -> Export text` from the menu, or `famitracker.exe song.ftm -export song.txt` from a terminal to make a text export of the song.
