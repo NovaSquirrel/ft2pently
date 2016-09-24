@@ -128,7 +128,9 @@ typedef struct ftmacro {
   uint8_t length, loop, release;
   char arp_type;
   char sequence[MAX_MACRO_LEN];
-  char decay_rate; // if 0, decay isn't used
+  uint8_t decay_rate;   // if 0, decay isn't used
+  uint8_t decay_volume; // starting volume to use for decay
+  uint8_t decay_index;  // index decay starts 
 } ftmacro;
 
 //////////////////// functions ////////////////////
@@ -280,20 +282,34 @@ void write_octave(FILE *file, int octave) {
 
 // writes an instrument's envelopes
 void write_instrument(FILE *file, int i, int absolute_pitch) {
-  if(instrument[i][MS_VOLUME] >= 0) {
-    fprintf(file, "  volume ");
-    write_macro(file, &instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]]);
+  unsigned int num_macro_volume = (unsigned)instrument[i][MS_VOLUME];
+  unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
+  unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
+  int decay_rate   = instrument_macro[MS_VOLUME][num_macro_volume].decay_rate;
+  int decay_volume = instrument_macro[MS_VOLUME][num_macro_volume].decay_volume;
+  int decay_index  = instrument_macro[MS_VOLUME][num_macro_volume].decay_index;
 
-    int decay = instrument_macro[MS_VOLUME][(unsigned)instrument[i][MS_VOLUME]].decay_rate;
-    if(decay)
-      fprintf(file, "  decay %i\r\n", decay);
+  if(instrument[i][MS_VOLUME] >= 0) {
+    ftmacro macro = instrument_macro[MS_VOLUME][num_macro_volume];
+
+    // do not use decay if it would interfere with the arpeggio or duty envelopes
+    if(decay_rate && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
+                                                        (instrument_macro[MS_ARPEGGIO][num_macro_arp].loop == 255)))
+                  && (instrument[i][MS_DUTY] < 0 || ((instrument_macro[MS_DUTY][num_macro_duty].length < decay_index) &&
+                                                    (instrument_macro[MS_DUTY][num_macro_duty].loop == 255)))) {
+      macro.sequence[decay_index] = decay_volume;
+      macro.length = decay_index + 1;
+      fprintf(file, "  decay %i\r\n", decay_rate);
+    }
+    fprintf(file, "  volume ");
+    write_macro(file, &macro);
   }
   if(instrument[i][MS_DUTY] >= 0) {
     fprintf(file, "  timbre ");
-    write_macro(file, &instrument_macro[MS_DUTY][(unsigned)instrument[i][MS_DUTY]]);
+    write_macro(file, &instrument_macro[MS_DUTY][num_macro_duty]);
   }
   if(instrument[i][MS_ARPEGGIO] >= 0) {
-    ftmacro *macro = &instrument_macro[MS_ARPEGGIO][(unsigned)instrument[i][MS_ARPEGGIO]];
+    ftmacro *macro = &instrument_macro[MS_ARPEGGIO][num_macro_arp];
     fprintf(file, "  pitch ");
 
     if(absolute_pitch) { // Pently sfx pitch envelopes require music notes, not semitone numbers
@@ -716,8 +732,8 @@ int main(int argc, char *argv[]) {
 
             int start_offset = length_envelope - length_decay;            // end of the envelope, backed up to where the decay would start
             if(!memcmp(instrument_macro[setting][id].sequence + start_offset, decay_envelope[i][j], length_decay)) {
-              instrument_macro[setting][id].sequence[start_offset] = i+1; // set last volume to starting volume
-              instrument_macro[setting][id].length = start_offset+1;      // cut off the rest of the envelope
+              instrument_macro[setting][id].decay_index = start_offset;
+              instrument_macro[setting][id].decay_volume = i+1;
               instrument_macro[setting][id].decay_rate = j+1;
               stop = 1;                                                   // break out of the loop
             }
