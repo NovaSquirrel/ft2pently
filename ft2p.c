@@ -168,6 +168,7 @@ void shift_semitones(ftnote *note, int offset) {
 
 // shows an error and stops the program
 void die(const char *reason) {
+  printf("Error: ");
   puts(reason);
   exit(-1);
 }
@@ -257,6 +258,8 @@ char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
 int decay_enabled = 0;
 char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
+int unsupported_error = 0;
+int warned_volume = 0;
 
 // writes the numbers for an instrument's envelope, including the loop point
 void write_macro(FILE *file, ftmacro *macro) {
@@ -484,6 +487,8 @@ int main(int argc, char *argv[]) {
       in_filename = argv[i+1];
     if(!strcmp(argv[i], "-o"))
       out_filename = argv[i+1];
+    if(!strcmp(argv[i], "-strict"))
+      unsupported_error = 1;
   }
 
   // complain if input or output not specified
@@ -568,8 +573,14 @@ int main(int argc, char *argv[]) {
                }
            }
 
-           if(line[9] != '.')
-             die("volume column not supported");
+           if(line[9] != '.') {
+             if(unsupported_error)
+               die("volume column not supported");
+             else if(!warned_volume) {
+               warned_volume = 1;
+               puts("Warning: volume column not supported");
+             }
+           }
          }
 
          // read effects

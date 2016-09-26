@@ -93,4 +93,6 @@ In Famitracker, either use `File -> Export text` from the menu, or `famitracker.
 
 Now, to run ft2pently: `ft2p -i song.txt -o song.pently`
 
+By default, ft2pently will only warn about unsupported effects (like the volume column). To make it give an error and stop instead, add the `-strict` flag.
+
 This output will need to be run through `pentlyas` to result in something the Pently engine can use.
