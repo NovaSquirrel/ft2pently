@@ -44,7 +44,7 @@ Set up the DPCM instrument as you usually would, with samples assigned to differ
 
 You need to make a file containing drum definitions for pentlyas. [the pentlyas manual](https://github.com/Qix-/pently/blob/master/docs/pentlyas.md) covers how to define drums. Drums that already sound nice can be found in [the sample songs](https://github.com/Qix-/pently/blob/master/src/musicseq.pently).
 
-Now that the sound of the drums are defined, ft2pently needs to know what DPCM channel notes correspond to which drums. This is done by putting commands for ft2pently in the song's comments section, reached with `Modules -> Comments` from the menu.
+Now that the sound of the drums are defined, ft2pently needs to know what DPCM channel notes correspond to which drums. This is done by putting commands for ft2pently in the song's comments section, reached with `Modules -> Comments` from the menu. (Make sure to have a blank line at the end of the comments)
 
 A sample drum configuration is as follows (with explanation):
 
@@ -76,6 +76,8 @@ drum c3 tkick
 `drumsfx` defines a new drum, using one or two sound effects. It takes the drum name, and then the names of the sound effect(s) used. Same naming restrictions.
 
 `drum` works as before.
+
+If your drums only consist of noise, you may add a line in the comments containing "auto noise" to handle converting different noise pitches into sound effects automatically. Note that if you do this, the DPCM channel will be ignored and you shouldn't use the sfx, drumsfx or drum commands.
 
 Auto decay
 ----------

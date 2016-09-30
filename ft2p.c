@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <string.h>
+#include <stdarg.h>
 
 // max values for some things
 #define MAX_EFFECTS     4
@@ -40,8 +41,7 @@
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
-const char *supported_effects = "034GQRS";
-const char *conductor_effects = "BCDF";
+const char *supported_effects = ".034BCDFGQRSJ";
 const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "drum", "attack"};
 
 //////////////////// enums and structs ////////////////////
@@ -89,9 +89,10 @@ enum {
   FX_ATTACK_ON= 'J'  // repurposed to specify attack target
 };
 
-// a sound effect definition, held onto until 
+// a sound effect definition, held onto until end of export
 typedef struct soundeffect {
   uint8_t instrument, channel;
+  uint8_t pitch; // pitch offset for auto noise, or 0
   char name[64];
 } soundeffect;
 
@@ -164,13 +165,6 @@ void shift_semitones(ftnote *note, int offset) {
   semitones += offset;
   // change back to a note
   semitone_to_note(semitones, &note->note, &note->octave);
-}
-
-// shows an error and stops the program
-void die(const char *reason) {
-  printf("Error: ");
-  puts(reason);
-  exit(-1);
 }
 
 // asserts that a value is in a given range
@@ -253,13 +247,29 @@ char instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
 char instrument_used[MAX_INSTRUMENTS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
+uint16_t instrument_noise[MAX_INSTRUMENTS]; // each bit corresponds to a needed frequency
 const char *in_filename, *out_filename;
 char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
 int decay_enabled = 0;
+int auto_noise = 0;
 char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
-int unsupported_error = 0;
+int strict = 0;
 int warned_volume = 0;
+
+// displays a warning or an error
+void error(int stop, const char *fmt, ...) {
+    if(strict)
+      stop = 1;
+    va_list args;
+    va_start(args, fmt);
+    printf((stop)?"Error: ":"Warning: ");
+    vprintf(fmt, args);
+    putchar('\n');
+    va_end(args);
+    if(stop)
+      exit(-1);
+}
 
 // writes the numbers for an instrument's envelope, including the loop point
 void write_macro(FILE *file, ftmacro *macro) {
@@ -387,7 +397,7 @@ void write_tempo(FILE *file, int speed, int tempo) {
 
 // writes a pattern to the output file
 void write_pattern(FILE *file, int id, int channel) {
-  if(channel == CH_NOISE) // noise not implemented yet
+  if((channel == CH_NOISE && !auto_noise) || (channel == CH_DPCM && auto_noise))
     return;
 
   ftnote *pattern = xsong.pattern[id][channel];
@@ -400,6 +410,8 @@ void write_pattern(FILE *file, int id, int channel) {
       instrument = pattern[i].instrument;
       break;
     }
+  if(instrument == -1)
+    error(1, "note with no instrument (%s %i)", chan_name[channel], id);
 
   // generate pattern name and specify absolute octaves
   fprintf(file, "\r\n  pattern pat_%i_%i_%i", song_num, channel, id);
@@ -420,9 +432,10 @@ void write_pattern(FILE *file, int id, int channel) {
     int duration = next-row;
 
     // write any instrument changes
-    if(isalpha(this_note) && pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
+    if(isalnum(this_note) && pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
       instrument = pattern[row].instrument;
-      fprintf(file, " @%s ", instrument_name[instrument]);
+      if(channel != CH_DPCM && channel != CH_NOISE)
+        fprintf(file, " @%s ", instrument_name[instrument]);
     }
 
     // handle any effects
@@ -451,12 +464,22 @@ void write_pattern(FILE *file, int id, int channel) {
     // write note
     if(this_note == '-' || !this_note) {
       fprintf(file, "r");
-    } else if(channel != CH_DPCM) {
+    } else if(channel != CH_DPCM && channel != CH_NOISE) {
+      // just write normal notes
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
 
       // shift the octave in the direction needed
       write_octave(file, octave);
+    } else if(channel == CH_NOISE) { // noise
+      // for noise, use the instrument name and the note frequency
+
+      // mark frequency as being used
+      char hex[2] = {this_note, 0};
+      instrument_noise[instrument] |= 1 << strtol(hex, NULL, 16);
+
+      fprintf(file, "%s_%c_", instrument_name[instrument], this_note);
     } else { // DPCM
+      // for DPCM: write drum name
       char *scale_note = strchr(scale, this_note);
       fprintf(file, "%s", drum_name[octave][scale_note-scale]);
     }
@@ -478,6 +501,7 @@ int main(int argc, char *argv[]) {
   memset(&instrument_used, 0, sizeof(instrument_used));
   memset(&instrument_macro, 0, sizeof(instrument_macro));
   memset(&instrument_name, 0, sizeof(instrument_name));
+  memset(&instrument_noise, 0, sizeof(instrument_noise));
   memset(&drum_name, 0, sizeof(drum_name));
   memset(&soundeffects, 0, sizeof(soundeffects));
 
@@ -488,20 +512,22 @@ int main(int argc, char *argv[]) {
     if(!strcmp(argv[i], "-o"))
       out_filename = argv[i+1];
     if(!strcmp(argv[i], "-strict"))
-      unsupported_error = 1;
+      strict = 1;
   }
 
   // complain if input or output not specified
-  if(!in_filename || !out_filename)
-    die("syntax: ft2p -i input -o output");
+  if(!in_filename || !out_filename) {
+    puts("syntax: ft2p -i input -o output");
+    exit(-1);
+  }
 
   // start reading file
   FILE *input_file = fopen(in_filename, "rb");
   if(!input_file)
-    die("Input file couldn't be opened");
+    error(1,"Input file couldn't be opened");
   FILE *output_file = fopen(out_filename, "wb");
   if(!output_file)
-    die("Output file couldn't be opened");
+    error(1,"Output file couldn't be opened");
   fprintf(output_file, "durations stick\r\nnotenames english\r\n");
 
   // process each line
@@ -557,14 +583,15 @@ int main(int argc, char *argv[]) {
          if(line[2] != '.') {
            // sharp note are uppercase
            note.note = (line[3]=='#')?toupper(line[2]):tolower(line[2]);
-           // octave will be garbage for note cuts, but that's OK
+           // octave will be garbage for note cuts and noise notes, but that's OK
            note.octave = line[4]-'0';
 
            // read instrument if it's there
-           if(isalpha(note.note) && line[6] != '.') { // will have to change isalpha for eventual noise track support
+           if(isalnum(note.note) && line[6] != '.') {
              note.instrument = strtol(line+6, NULL, 16);
              check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS);
-             instrument_used[(unsigned)note.instrument] = 1;
+             if(channel != CH_NOISE && channel != CH_DPCM)
+               instrument_used[(unsigned)note.instrument] = 1;
            } else { // if it's not, go back and find it
              for(j=row-1; j>=0; j--)
                if(song.pattern[song.pattern_id][channel][j].note && (song.pattern[song.pattern_id][channel][j].instrument != -1)) {
@@ -574,11 +601,9 @@ int main(int argc, char *argv[]) {
            }
 
            if(line[9] != '.') {
-             if(unsupported_error)
-               die("volume column not supported");
-             else if(!warned_volume) {
+             if(!warned_volume) {
+               error(0,"volume column not supported");
                warned_volume = 1;
-               puts("Warning: volume column not supported");
              }
            }
          }
@@ -587,6 +612,8 @@ int main(int argc, char *argv[]) {
          for(j=0; j<song.effect_columns[channel]; j++) {
            // read in the effect type and value
            char *effect = line+11;
+           if(!strchr(supported_effects, *effect))
+             error(0, "unsupported effect (%c)", *effect);
            note.effect[j] = *effect;
            note.param[j]  = strtol(effect+1, NULL, 16);
 
@@ -628,7 +655,7 @@ int main(int argc, char *argv[]) {
            }
          }
 
-         // finally write the not we made into the pattern
+         // finally write the note we made into the pattern
          song.pattern[song.pattern_id][channel][row] = note;
       }
 
@@ -640,19 +667,21 @@ int main(int argc, char *argv[]) {
       if(*arg == '\"')
         arg++;
       char *arg2;
-      // import another file into this file
       if(starts_with(arg, "include ", &arg2)) {
+        // import another file into this file
         FILE *included = fopen(arg2, "rb");
         if(!included)
-          die("couldn't open included file");
+          error(1,"couldn't open included file");
         while(!feof(included)) {
           char c = fgetc(included);
           if(c != EOF)
             fputc(c, output_file);
         }
         fclose(included);
-      // generate decay tables
+      } else if(strcmp(arg, "auto noise")) {
+        auto_noise = 1;
       } else if(strcmp(arg, "auto decay")) {
+        // generate decay tables
         decay_enabled = 1;
         for(i=0;i<MAX_DECAY_START;i++)
           for(j=0;j<MAX_DECAY_RATE;j++) {
@@ -667,8 +696,8 @@ int main(int argc, char *argv[]) {
             if(value != 0)
               decay_envelope[i][j][index++] = 0;
           }
-      // define a sound effect using an instrument
       } else if(starts_with(arg, "sfx ", &arg2)) {
+        // define a sound effect using an instrument
         soundeffects[sfx_num].instrument = strtol(arg2, &arg2, 16);
         // skip to channel
         while(*arg2 == ' ')
@@ -688,14 +717,14 @@ int main(int argc, char *argv[]) {
           arg2++;
         strlcpy(soundeffects[sfx_num].name, arg2, 64);
         sfx_num++;
-      // define a drum using sound effects
       } else if(starts_with(arg, "drumsfx ", &arg2)) {
+        // define a drum using sound effects
         fprintf(output_file, "drum %s\r\n", arg2);
-      // drum = assign a drum to a DPCM note
       } else if(starts_with(arg, "drum ", &arg2)) {
+        // drum = assign a drum to a DPCM note
         char *note = strchr(scale, tolower(arg2[0]));
         if(!note)
-          die("invalid note in scale");
+          error(1,"invalid note in scale (%c)", *note);
         char *octave_ptr = arg2+1;
         if(*octave_ptr == '#') 
           note++;
@@ -728,7 +757,7 @@ int main(int argc, char *argv[]) {
       while(*arg) {
         instrument_macro[setting][id].sequence[instrument_macro[setting][id].length++] = strtol(arg, &arg, 10);
         if(instrument_macro[setting][id].length >= MAX_MACRO_LEN)
-          die("instrument macro too long");
+          error(1,"instrument macro too long");
       }
 
       // if auto decay is enabled and this is a volume envelope, try to find a decay envelope
@@ -804,7 +833,7 @@ int main(int argc, char *argv[]) {
         for(i=0; i<MAX_PATTERNS; i++) {
           int not_empty = 0;
           for(int row = 0; row < xsong.rows; row++)
-            if(isalpha(xsong.pattern[i][j][row].note)) {
+            if(isalnum(xsong.pattern[i][j][row].note)) {
               not_empty = 1;
               break;
             }
@@ -826,11 +855,15 @@ int main(int argc, char *argv[]) {
         int min_length = MAX_ROWS; // minimum pattern length in this frame
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = xsong.frame[i][j];
-          if(j != CH_NOISE && xsong.pattern_used[pattern][j]) {
+          if(((!auto_noise && j != CH_NOISE) || (auto_noise && j != CH_DPCM))
+            && xsong.pattern_used[pattern][j]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) { // stop channel if it was playing but now it isn't
-            fprintf(output_file, "\r\n  stop %s", chan_name[j]);
+            if(j == CH_NOISE)
+              fprintf(output_file, "\r\n  stop drum");
+            else
+              fprintf(output_file, "\r\n  stop %s", chan_name[j]);
             channel_playing[j] = 0;
           }
           if(xsong.pattern_length[pattern][j] < min_length)
@@ -878,7 +911,47 @@ int main(int argc, char *argv[]) {
 
       need_song_export = 0;
     }
+    if(!strcmp(buffer, "# End of export")) {
+      // write automatic noise instruments if needed
+      if(auto_noise)
+        for(i=0; i<MAX_INSTRUMENTS; i++)
+          if(instrument_noise[i])
+            for(j=0; j<16; j++)
+              if(instrument_noise[i] & (1 << j)) {
+                // make a new sound effect for the noise frequency
+                fprintf(output_file, "\r\nsfx noise_%s_%x on noise\r\n", instrument_name[i], j);
 
+                // get the arpeggio envelope, change it and restore it to what it was
+                unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
+                unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
+                if(num_macro_arp > MAX_INSTRUMENTS) {
+                  // no arpeggio set, so make one
+                  ftmacro new_macro = {1, 255, 255, 0, {0}};
+                  instrument_macro[MS_ARPEGGIO][MAX_INSTRUMENTS-1] = new_macro;
+                  instrument[i][MS_ARPEGGIO] = MAX_INSTRUMENTS-1;
+                  num_macro_arp = MAX_INSTRUMENTS - 1;
+                }
+                int k;
+                if(num_macro_duty < MAX_INSTRUMENTS) {
+                  // if duty is used, wrap all duty values to 0 and 1
+                  // we don't need to worry about saving and restoring because the macros
+                  // won't be needed after the automatic noise drums are written
+                  ftmacro *duty_macro = &instrument_macro[MS_DUTY][num_macro_duty];
+                  for(k=0; k<duty_macro->length; k++)
+                    duty_macro->sequence[k] &= 1;
+                }
+
+                ftmacro *arp_macro = &instrument_macro[MS_ARPEGGIO][num_macro_arp];
+                ftmacro old = *arp_macro;
+                for(k=0; k<arp_macro->length; k++)
+                  arp_macro->sequence[k] = (arp_macro->sequence[k]+j)&15;
+                write_instrument(output_file, i, 0);
+                *arp_macro = old;
+
+                // define a drum for the frequency
+                fprintf(output_file, "\r\ndrum %s_%x_ noise_%s_%x", instrument_name[i], j, instrument_name[i], j);
+              }
+    }
   }
 
   // close files
