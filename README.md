@@ -36,13 +36,23 @@ Pently supports sharing one channel between two different patterns. To use it in
 
 The channel being interrupted must be at the end of its volume envelope by the time the attack happens, because it won't resume the earlier attack.
 
+An instrument WILL return to a decay if it was interrupted during a decay, however. See the "Auto decay" section in this manual for information on how to use decay.
+
 Drums
 -----
-Pently's drum implementation plays a sound effect on up to two channels. In a later version of ft2pently you will be able to choose to automatically convert the noise track into drums, but currently you must use the DPCM channel.
 
-Set up the DPCM instrument as you usually would, with samples assigned to different notes. The samples aren't actually used in the conversion, but will let you hear what the drum section of the song sounds like while composing it.
+Pently's drum implementation plays a sound effect on up to two channels. Although DPCM is not supported, good drum sounds can be made by combining a noise channel sound with a triangle channel sound.
 
-You need to make a file containing drum definitions for pentlyas. [the pentlyas manual](https://github.com/Qix-/pently/blob/master/docs/pentlyas.md) covers how to define drums. Drums that already sound nice can be found in [the sample songs](https://github.com/Qix-/pently/blob/master/src/musicseq.pently).
+ft2pently can handle drums three different ways. If your game's drums are just noise instruments and you're happy with them, just put `auto noise` in the .ftm's comments and you're done!
+
+Keep in mind that Pently has a hard limit of 25 drums (because drums map to notes, and Pently can only see about two octaves at a time), and each frequency a noise instrument gets used at counts as another drum, so be careful not to use too many. Also, keep in mind that if `auto noise` mode is on, the DPCM channel in the .ftm is ignored. The noise channel and DPCM channels don't mix together.
+
+Using native Pently drums
+-------------------------
+
+Set up the DPCM instrument as you usually would, with samples assigned to different notes. The samples aren't actually used in the conversion, but will let you approximate what the drum section of the song will sound like as you're composing it.
+
+You need to make a file containing drum definitions for pentlyas. [The pentlyas manual](https://github.com/Qix-/pently/blob/master/docs/pentlyas.md) covers how to define drums. Drums that already sound nice can be found in [the sample songs](https://github.com/Qix-/pently/blob/master/src/musicseq.pently).
 
 Now that the sound of the drums are defined, ft2pently needs to know what DPCM channel notes correspond to which drums. This is done by putting commands for ft2pently in the song's comments section, reached with `Modules -> Comments` from the menu. (Make sure to have a blank line at the end of the comments)
 
@@ -76,8 +86,6 @@ drum c3 tkick
 `drumsfx` defines a new drum, using one or two sound effects. It takes the drum name, and then the names of the sound effect(s) used. Same naming restrictions.
 
 `drum` works as before.
-
-If your drums only consist of noise, you may add a line in the comments containing "auto noise" to handle converting different noise pitches into sound effects automatically. Note that if you do this, the DPCM channel will be ignored and you shouldn't use the sfx, drumsfx or drum commands.
 
 Auto decay
 ----------
