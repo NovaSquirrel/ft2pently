@@ -89,6 +89,15 @@ enum {
   FX_ATTACK_ON= 'J'  // repurposed to specify attack target
 };
 
+// vlumes
+enum {
+  VOL_SAME, // no change
+  VOL_FF,   // 100%
+  VOL_MF,   // 75%
+  VOL_MP,   // 50%
+  VOL_PP,   // 25%
+};
+
 // a sound effect definition, held onto until end of export
 typedef struct soundeffect {
   uint8_t instrument, channel;
@@ -100,7 +109,8 @@ typedef struct soundeffect {
 typedef struct ftnote {
   uint8_t octave;             // octave number
   char note;                  // note name, capitalized if sharp
-  char instrument;            // instrument number
+  uint8_t instrument;         // instrument number
+  uint8_t volume;             // 
   char effect[MAX_EFFECTS];   // effect name
   uint8_t param[MAX_EFFECTS]; // effect parameter
   uint8_t slur;               // nonzero if note has slur
@@ -255,7 +265,6 @@ int decay_enabled = 0;
 int auto_noise = 0;
 char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
 int strict = 0;
-int warned_volume = 0;
 
 // displays a warning or an error
 void error(int stop, const char *fmt, ...) {
@@ -438,6 +447,24 @@ void write_pattern(FILE *file, int id, int channel) {
         fprintf(file, " @%s ", instrument_name[instrument]);
     }
 
+    // write volume changes
+    if(pattern[row].volume) {
+      switch(pattern[row].volume) {
+        case VOL_FF:
+          fprintf(file, "ff ");
+          break;
+        case VOL_MF:
+          fprintf(file, "mf ");
+          break;
+        case VOL_MP:
+          fprintf(file, "mp ");
+          break;
+        case VOL_PP:
+          fprintf(file, "pp ");
+          break;
+      }
+    }
+
     // handle any effects
     for(i=0; i<MAX_EFFECTS; i++) {
       switch(pattern[row].effect[i]) {
@@ -600,11 +627,26 @@ int main(int argc, char *argv[]) {
                }
            }
 
+           // volume column
            if(line[9] != '.') {
-             if(!warned_volume) {
-               error(0,"volume column not supported");
-               warned_volume = 1;
-             }
+             int volume = VOL_SAME;
+             int digit = strtol(line+9, NULL, 16);
+             if(digit < 6)
+               volume = VOL_PP;
+             else if(digit <= 9)
+               volume = VOL_MP;
+             else if(digit <= 12)
+               volume = VOL_MF;
+             else
+               volume = VOL_FF;
+             int last_volume = VOL_SAME;
+             for(j=row-1; j>=0; j--)
+               if(song.pattern[song.pattern_id][channel][j].volume) {
+                 last_volume = song.pattern[song.pattern_id][channel][j].volume;
+                 break;
+               }
+             if(volume != last_volume)    
+               note.volume = volume;
            }
          }
 

@@ -7,7 +7,7 @@ ft2pently takes Famitracker's text exports and converts it to the Pently music e
 Limitations
 -----------------------
 As with the other music engines that offer conversions from Famitracker, composers have to limit the Famitracker effects they use.
-Most effects are unsupported, as is the volume column and "pitch" and "hi-pitch" envelopes.
+Most effects are unsupported, as are the "pitch" and "hi-pitch" envelopes.
 
 Supported effects:
 * 0xy - Arpeggio
@@ -28,6 +28,7 @@ Things to keep in mind:
 * An instrument's envelope will only last as long as the volume envelope. If your instrument's arpeggio or duty envelopes are longer than the volume envelope and you want the whole arpeggio/duty envelope to play, extend the volume envelope to match.
 * Triangle channel volume is still used for determining whether a note should be interrupted by a sound effect or not.
 * Triangle instrument duty must be 50% (or unspecified, which defaults to 50%) or the note will cut prematurely.
+* The volume column is supported, but can only do 25%, 50%, 75% and 100% volume rather than the range Famitracker has. 0-6 maps to 25%, 6-9 maps to 50%, A-C maps to 75% and D-F maps to 100%.
 
 Attack channel
 --------------
@@ -103,6 +104,6 @@ In Famitracker, either use `File -> Export text` from the menu, or `famitracker.
 
 Now, to run ft2pently: `ft2p -i song.txt -o song.pently`
 
-By default, ft2pently will only warn about unsupported effects (like the volume column). To make it give an error and stop instead, add the `-strict` flag.
+By default, ft2pently will only warn about unsupported effects. To make it give an error and stop instead, add the `-strict` flag.
 
 This output will need to be run through `pentlyas` to result in something the Pently engine can use.
