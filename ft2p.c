@@ -110,7 +110,7 @@ typedef struct soundeffect {
 typedef struct ftnote {
   uint8_t octave;             // octave number
   char note;                  // note name, capitalized if sharp
-  uint8_t instrument;         // instrument number
+  int8_t instrument;          // instrument number
   uint8_t volume;             // 
   char effect[MAX_EFFECTS];   // effect name
   uint8_t param[MAX_EFFECTS]; // effect parameter
@@ -286,7 +286,6 @@ void error(int stop, const char *fmt, ...) {
 
 const char *error_location(ftsong *the_song, int channel, int pattern, int row) {
   static char buffer[200];
-  char temp[50];
 
   if(hex_rows) {
     if(row == -1)
@@ -1016,7 +1015,7 @@ int main(int argc, char *argv[]) {
                 unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
                 if(num_macro_arp > MAX_INSTRUMENTS) {
                   // no arpeggio set, so make one
-                  ftmacro new_macro = {1, 255, 255, 0, {0}};
+                  ftmacro new_macro = {1, 255, 255, 0, {0}, 0, 0, 0};
                   instrument_macro[MS_ARPEGGIO][MAX_INSTRUMENTS-1] = new_macro;
                   instrument[i][MS_ARPEGGIO] = MAX_INSTRUMENTS-1;
                   num_macro_arp = MAX_INSTRUMENTS - 1;
