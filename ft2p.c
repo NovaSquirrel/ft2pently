@@ -328,12 +328,14 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
   unsigned int num_macro_volume = (unsigned)instrument[i][MS_VOLUME];
   unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
   unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
-  int decay_rate   = instrument_macro[MS_VOLUME][num_macro_volume].decay_rate;
-  int decay_volume = instrument_macro[MS_VOLUME][num_macro_volume].decay_volume;
-  int decay_index  = instrument_macro[MS_VOLUME][num_macro_volume].decay_index;
+
+  int decay_rate = 0, decay_volume = 0, decay_index = 0;
 
   if(instrument[i][MS_VOLUME] >= 0) {
     ftmacro macro = instrument_macro[MS_VOLUME][num_macro_volume];
+    decay_rate   = macro.decay_rate;
+    decay_volume = macro.decay_volume;
+    decay_index  = macro.decay_index;
 
     // do not use decay if it would interfere with the arpeggio or duty envelopes
     if(decay_rate && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 

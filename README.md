@@ -106,4 +106,6 @@ Now, to run ft2pently: `ft2p -i song.txt -o song.pently`
 
 By default, ft2pently will only warn about unsupported effects. To make it give an error and stop instead, add the `-strict` flag.
 
+Errors will display row numbers in decimal by default, but you can choose hex row numbers with `-hexrow`.
+
 This output will need to be run through `pentlyas` to result in something the Pently engine can use.
