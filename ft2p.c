@@ -646,7 +646,7 @@ int main(int argc, char *argv[]) {
            // read instrument if it's there
            if(isalnum(note.note) && line[6] != '.') {
              int read_instrument = strtol(line+6, NULL, 16);
-             if(read_instrument < 0 || read_instrument > MAX_INSTRUMENTS) {
+             if(read_instrument < 0 || read_instrument >= MAX_INSTRUMENTS) {
                error(0, "instrument (%i) out of range - %s", read_instrument, error_location(&song, channel, song.pattern_id, row));
                // skip this note altogether
                continue;
@@ -1013,7 +1013,7 @@ int main(int argc, char *argv[]) {
                 // get the arpeggio envelope, change it and restore it to what it was
                 unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
                 unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
-                if(num_macro_arp > MAX_INSTRUMENTS) {
+                if(num_macro_arp >= MAX_INSTRUMENTS) {
                   // no arpeggio set, so make one
                   ftmacro new_macro = {1, 255, 255, 0, {0}, 0, 0, 0};
                   instrument_macro[MS_ARPEGGIO][MAX_INSTRUMENTS-1] = new_macro;
