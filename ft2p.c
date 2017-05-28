@@ -1,7 +1,7 @@
 /*
  * ft2pently
  *
- * Copyright (C) 2016 NovaSquirrel
+ * Copyright (C) 2016-2017 NovaSquirrel
  *
  * This program is free software: you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -27,8 +27,8 @@
 // max values for some things
 #define MAX_EFFECTS     4
 #define MAX_ROWS        256
-#define MAX_FRAMES      32   // real max is 128
-#define MAX_PATTERNS    32   // real max is 128
+#define MAX_FRAMES      128  // real max is 128
+#define MAX_PATTERNS    128  // real max is 128
 #define MAX_INSTRUMENTS 64   // pently limit is 256/5
 #define MAX_MACRO_LEN   255  // real max is like 254?
 #define MAX_OCTAVE      7
@@ -43,6 +43,7 @@
 const char *scale = "cCdDefFgGaAb";
 const char *supported_effects = ".034BCDFGQRSJ";
 const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "drum", "attack"};
+const char *envelope_types[] = {"volume", "arpeggio", "pitch", "hipitch", "duty"};
 
 //////////////////// enums and structs ////////////////////
 enum {
@@ -119,7 +120,8 @@ typedef struct ftnote {
 // a song and its patterns
 typedef struct ftsong {
   // Explicitly stated song information
-  char name[32];
+  char real_name[32]; // name to display for errors
+  char name[32];      // sanitized name for the actual file
   int rows, speed, tempo;
 
   // Buffers to hold song information
@@ -178,10 +180,10 @@ void shift_semitones(ftnote *note, int offset) {
 }
 
 // asserts that a value is in a given range
-void check_range(const char *name, int value, int low, int high) {
+void check_range(const char *name, int value, int low, int high, const char *location) {
   if(value >= low && value < high)
     return;
-  printf("Error: %s out of range (%i, must be below %i)\n", name, value, high);
+  printf("Error: %s out of range (%i, must be below %i) %s\n", name, value, high, location?location:"");
   exit(-1);
 }
 
@@ -263,6 +265,7 @@ char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
 int decay_enabled = 0;
 int auto_noise = 0;
+int hex_rows = 0;
 char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
 int strict = 0;
 
@@ -278,6 +281,24 @@ void error(int stop, const char *fmt, ...) {
     va_end(args);
     if(stop)
       exit(-1);
+}
+
+const char *error_location(ftsong *the_song, int channel, int pattern, int row) {
+  static char buffer[200];
+  char temp[50];
+
+  if(hex_rows) {
+    if(row == -1)
+      sprintf(buffer, "[%s - %s pattern $%x]", the_song->real_name, chan_name[channel], pattern);
+    else
+      sprintf(buffer, "[%s - %s pattern $%x row $%x]", the_song->real_name, chan_name[channel], pattern, row);
+  } else {
+    if(row == -1)
+      sprintf(buffer, "[%s - %s pattern %i]", the_song->real_name, chan_name[channel], pattern);
+    else
+      sprintf(buffer, "[%s - %s pattern %i row %i]", the_song->real_name, chan_name[channel], pattern, row);
+  }
+  return buffer;
 }
 
 // writes the numbers for an instrument's envelope, including the loop point
@@ -420,7 +441,7 @@ void write_pattern(FILE *file, int id, int channel) {
       break;
     }
   if(instrument == -1)
-    error(1, "note with no instrument (%s %i)", chan_name[channel], id);
+    error(1, "note with no instrument %s", error_location(&xsong, channel, id, -1));
 
   // generate pattern name and specify absolute octaves
   fprintf(file, "\r\n  pattern pat_%i_%i_%i", song_num, channel, id);
@@ -540,6 +561,8 @@ int main(int argc, char *argv[]) {
       out_filename = argv[i+1];
     if(!strcmp(argv[i], "-strict"))
       strict = 1;
+    if(!strcmp(argv[i], "-hexrow"))
+      hex_rows = 1;
   }
 
   // complain if input or output not specified
@@ -577,17 +600,18 @@ int main(int argc, char *argv[]) {
       song.speed = strtol(arg, &arg, 10);
       song.tempo = strtol(arg, &arg, 10);
       arg = strchr(arg, '\"');
+      strlcpy(song.real_name, arg+1, sizeof(song.real_name));
       sanitize_name(song.name, arg+1, sizeof(song.name));
     }
 
     else if(starts_with(buffer, "PATTERN ", &arg)) {
       song.pattern_id = strtol(arg, NULL, 16);
-      check_range("pattern id", song.pattern_id, 0, MAX_PATTERNS);
+      check_range("pattern id", song.pattern_id, 0, MAX_PATTERNS, song.real_name);
     }
 
     else if(starts_with(buffer, "ROW ", &arg)) {
       int row = strtol(arg, &arg, 16);
-      check_range("row id", row, 0, MAX_ROWS);
+      check_range("row id", row, 0, MAX_ROWS, error_location(&song, 0, song.pattern_id, -1));
 
       for(int channel=0; channel<CHANNEL_COUNT; channel++) {
          // find next channel
@@ -616,7 +640,12 @@ int main(int argc, char *argv[]) {
            // read instrument if it's there
            if(isalnum(note.note) && line[6] != '.') {
              note.instrument = strtol(line+6, NULL, 16);
-             check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS);
+//           check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS, error_location(&song, channel, song.pattern_id, row));
+             if(note.instrument > MAX_INSTRUMENTS) {
+               error(0, "instrument (%i) out of range - %s", note.instrument, error_location(&song, channel, song.pattern_id, row));
+               // skip this note altogether
+               continue;
+             }
              if(channel != CH_NOISE && channel != CH_DPCM)
                instrument_used[(unsigned)note.instrument] = 1;
            } else { // if it's not, go back and find it
@@ -655,7 +684,7 @@ int main(int argc, char *argv[]) {
            // read in the effect type and value
            char *effect = line+11;
            if(!strchr(supported_effects, *effect))
-             error(0, "unsupported effect (%c)", *effect);
+             error(0, "unsupported effect (%c) %s", *effect, error_location(&song, channel, song.pattern_id, row));
            note.effect[j] = *effect;
            note.param[j]  = strtol(effect+1, NULL, 16);
 
@@ -713,7 +742,7 @@ int main(int argc, char *argv[]) {
         // import another file into this file
         FILE *included = fopen(arg2, "rb");
         if(!included)
-          error(1,"couldn't open included file");
+          error(1,"couldn't open included file \"%s\"", arg2);
         while(!feof(included)) {
           char c = fgetc(included);
           if(c != EOF)
@@ -766,14 +795,14 @@ int main(int argc, char *argv[]) {
         // drum = assign a drum to a DPCM note
         char *note = strchr(scale, tolower(arg2[0]));
         if(!note)
-          error(1,"invalid note in scale (%c)", *note);
+          error(1,"invalid note in drum definition (%c)");
         char *octave_ptr = arg2+1;
         if(*octave_ptr == '#') 
           note++;
         if(!isdigit(*octave_ptr))
           octave_ptr++;
         int octave = *octave_ptr-'0';
-        check_range("drum octave", octave, 0, NUM_OCTAVES);
+        check_range("drum octave", octave, 0, NUM_OCTAVES, NULL);
         strlcpy(drum_name[octave][note-scale], octave_ptr+2, 16);
       }
     }
@@ -786,9 +815,9 @@ int main(int argc, char *argv[]) {
 
     else if(starts_with(buffer, "MACRO ", &arg)) {
       int setting = strtol(arg, &arg, 10);
-      check_range("macro setting type", setting, 0, MACRO_SET_COUNT);
+      check_range("macro setting type", setting, 0, MACRO_SET_COUNT, NULL);
       int id = strtol(arg, &arg, 10);
-      check_range("macro id", id, 0, MAX_INSTRUMENTS);
+      check_range("macro id", id, 0, MAX_INSTRUMENTS, NULL);
       instrument_macro[setting][id].loop = strtol(arg, &arg, 10);    // -1 gets set as 255
       instrument_macro[setting][id].release = strtol(arg, &arg, 10);
       instrument_macro[setting][id].length = 0;
@@ -799,7 +828,7 @@ int main(int argc, char *argv[]) {
       while(*arg) {
         instrument_macro[setting][id].sequence[instrument_macro[setting][id].length++] = strtol(arg, &arg, 10);
         if(instrument_macro[setting][id].length >= MAX_MACRO_LEN)
-          error(1,"instrument macro too long");
+          error(1,"instrument \"%s\" has a %s envelope that's too long (max length is %i)", instrument_name[id], envelope_types[setting], MAX_MACRO_LEN);
       }
 
       // if auto decay is enabled and this is a volume envelope, try to find a decay envelope
@@ -826,10 +855,10 @@ int main(int argc, char *argv[]) {
 
     else if(starts_with(buffer, "INST2A03 ", &arg)) {
       int id = strtol(arg, &arg, 10);
-      check_range("instrument id", song.pattern_id, 0, MAX_INSTRUMENTS);
+      check_range("instrument id", song.pattern_id, 0, MAX_INSTRUMENTS, NULL);
       for(i=0; i<MACRO_SET_COUNT; i++) {
         instrument[id][i] = strtol(arg, &arg, 10);
-        check_range("macro sequence id", instrument[id][i], -1, MAX_INSTRUMENTS);
+        check_range("macro sequence id", instrument[id][i], -1, MAX_INSTRUMENTS, NULL);
       }
       arg = strchr(arg, '\"');
       sanitize_name(instrument_name[id], arg+1, sizeof(instrument_name[id]));
@@ -838,7 +867,7 @@ int main(int argc, char *argv[]) {
     else if(starts_with(buffer, "ORDER ", &arg)) {
       int id = strtol(arg, &arg, 16);
       song.frames = id+1; // assume last frame in file is last frame in song
-      check_range("frame number", id, 0, MAX_FRAMES);
+      check_range("frame number", id, 0, MAX_FRAMES, song.real_name);
       arg = skip_to_number(arg);
       for(i=0; i<CHANNEL_COUNT; i++)
         song.frame[id][i] = strtol(arg, &arg, 16);
@@ -866,7 +895,7 @@ int main(int argc, char *argv[]) {
       need_song_export = 1;
     }
     if(need_song_export) {
-      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", xsong.name);
+      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", xsong.real_name);
       write_tempo(output_file, xsong.speed, xsong.tempo);
       fprintf(output_file, "\r\n");
 
