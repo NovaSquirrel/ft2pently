@@ -16,7 +16,7 @@ Supported effects:
 * Dxx - Pattern cut (xx ignored, always zero)
 * Fxx - Tempo/speed change
 * Gxx - Delay note start
-* Sxx - Delay note cut (not usable on empty rows yet)
+* Sxx - Delay note cut
 * 300 - Disable slur
 * 3xx - Enable slur (if x is nonzero)
 * 4xy - Vibrato of depth Y. X (speed) is ignored; use 5 to approximate Pently's vibrato speed in Famitracker. Valid depths are 0 through 4, where 4 is very strong and 0 is disabled.

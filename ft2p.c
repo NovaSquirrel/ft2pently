@@ -500,13 +500,17 @@ void write_pattern(FILE *file, int id, int channel) {
         case FX_VIBRATO:
           fprintf(file, "@MP%x ", pattern[row].param[i] & 15);
           break;
-        case FX_DELAY:
-          fprintf(file, "r%ig ", pattern[row].param[i]);
-          break;
         case FX_DELAYCUT:
           delay_cut = pattern[row].param[i];
-          if(this_note && !pattern[row+1].note)
+          if(this_note) {
+            // next note should be empty
             pattern[row+1].note = '-';
+            break;
+          }
+          // if it's an empty row, turn it into a delay and insert a note cut right here instead of at the next note
+          pattern[row].note = '-';
+        case FX_DELAY:
+          fprintf(file, "r%ig ", pattern[row].param[i]);
           break;
       }
     }
@@ -693,10 +697,10 @@ int main(int argc, char *argv[]) {
            // some effects call for processing during pattern reading
            ftnote *next_note = &song.pattern[song.pattern_id][channel][row+1];
            switch(*effect) {
-             case FX_DELAYCUT: // fix for delaying a cut on an empty row
-               if(!note.note)  // (which I don't think works yet??)
-                 note.note = '~';
-               break;
+//             case FX_DELAYCUT: // fix for delaying a cut on an empty row
+//               if(!note.note)  // (which I don't think works yet??)
+//                 note.note = '~';
+//               break;
              case FX_SLUR:
                if(note.param[j]) // set slur on previous note
                  for(int k=row-1; k >= 0; k--)
