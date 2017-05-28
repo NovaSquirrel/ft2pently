@@ -268,6 +268,7 @@ int auto_noise = 0;
 int hex_rows = 0;
 char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
 int strict = 0;
+int duplicate_name_counter = 0;
 
 // displays a warning or an error
 void error(int stop, const char *fmt, ...) {
@@ -868,6 +869,18 @@ int main(int argc, char *argv[]) {
       }
       arg = strchr(arg, '\"');
       sanitize_name(instrument_name[id], arg+1, sizeof(instrument_name[id]));
+
+      // check for duplicate names
+      for(i=0; i<id; i++) {
+         if(!strcmp(instrument_name[i], instrument_name[id])) {
+           char temp[20];
+           duplicate_name_counter++;
+           sprintf(temp, "___%i", duplicate_name_counter);
+           strcat(instrument_name[id], temp);
+           error(0, "Duplicate instrument name (%s), renaming to \"%s\"", instrument_name[i], instrument_name[id]);
+           break;
+         }
+      }
     }
 
     else if(starts_with(buffer, "ORDER ", &arg)) {
