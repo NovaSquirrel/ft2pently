@@ -148,7 +148,7 @@ typedef struct ftmacro {
 
 //////////////////// functions ////////////////////
 
-ftnote make_note(uint8_t octave, char note, char instrument) {
+ftnote make_note(uint8_t octave, char note, int8_t instrument) {
   ftnote new_note;
   memset(&new_note, 0, sizeof(new_note));
   new_note.octave = octave;
@@ -255,11 +255,11 @@ char *skip_to_number(char *string) {
 //////////////////// global variables ////////////////////
 ftsong song, xsong;
 int song_num = 0, sfx_num = 0;
-char instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
-char instrument_used[MAX_INSTRUMENTS];
+int8_t instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
+uint8_t instrument_used[MAX_INSTRUMENTS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
-uint16_t instrument_noise[MAX_INSTRUMENTS]; // each bit corresponds to a needed frequency
+uint16_t instrument_noise[MAX_INSTRUMENTS]; // each bit in each 16-bit value corresponds to a needed frequency
 const char *in_filename, *out_filename;
 char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
@@ -645,15 +645,15 @@ int main(int argc, char *argv[]) {
 
            // read instrument if it's there
            if(isalnum(note.note) && line[6] != '.') {
-             note.instrument = strtol(line+6, NULL, 16);
-//           check_range("instrument id", note.instrument, 0, MAX_INSTRUMENTS, error_location(&song, channel, song.pattern_id, row));
-             if(note.instrument > MAX_INSTRUMENTS) {
-               error(0, "instrument (%i) out of range - %s", note.instrument, error_location(&song, channel, song.pattern_id, row));
+             int read_instrument = strtol(line+6, NULL, 16);
+             if(read_instrument < 0 || read_instrument > MAX_INSTRUMENTS) {
+               error(0, "instrument (%i) out of range - %s", read_instrument, error_location(&song, channel, song.pattern_id, row));
                // skip this note altogether
                continue;
              }
              if(channel != CH_NOISE && channel != CH_DPCM)
-               instrument_used[(unsigned)note.instrument] = 1;
+               instrument_used[read_instrument] = 1;
+             note.instrument = read_instrument;
            } else { // if it's not, go back and find it
              for(j=row-1; j>=0; j--)
                if(song.pattern[song.pattern_id][channel][j].note && (song.pattern[song.pattern_id][channel][j].instrument != -1)) {
