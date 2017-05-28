@@ -914,7 +914,7 @@ int main(int argc, char *argv[]) {
       need_song_export = 1;
     }
     if(need_song_export) {
-      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", xsong.real_name);
+      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", xsong.name);
       write_tempo(output_file, xsong.speed, xsong.tempo);
       fprintf(output_file, "\r\n");
 
