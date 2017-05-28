@@ -46,13 +46,14 @@ const char *chan_name[] = {"pulse1", "pulse2", "triangle", "noise", "drum", "att
 const char *envelope_types[] = {"volume", "arpeggio", "pitch", "hipitch", "duty"};
 
 //////////////////// enums and structs ////////////////////
+// sound channels
 enum {
   CH_SQUARE1,
   CH_SQUARE2,
   CH_TRIANGLE,
   CH_NOISE,
-  CH_DPCM,
-  CH_ATTACK,
+  CH_DPCM,      // not supported, but used for Pently drums
+  CH_ATTACK,    // MMC5's first expansion square channel
   CHANNEL_COUNT
 };
 
@@ -90,7 +91,7 @@ enum {
   FX_ATTACK_ON= 'J'  // repurposed to specify attack target
 };
 
-// vlumes
+// volumes
 enum {
   VOL_SAME, // no change
   VOL_FF,   // 100%
@@ -100,6 +101,7 @@ enum {
 };
 
 // a sound effect definition, held onto until end of export
+// used for drums and auto-generated noise drums
 typedef struct soundeffect {
   uint8_t instrument, channel;
   uint8_t pitch; // pitch offset for auto noise, or 0
@@ -111,8 +113,8 @@ typedef struct ftnote {
   uint8_t octave;             // octave number
   char note;                  // note name, capitalized if sharp
   int8_t instrument;          // instrument number
-  uint8_t volume;             // 
-  char effect[MAX_EFFECTS];   // effect name
+  uint8_t volume;             // note volume, uses VOL_* values
+  char effect[MAX_EFFECTS];   // effect letter
   uint8_t param[MAX_EFFECTS]; // effect parameter
   uint8_t slur;               // nonzero if note has slur
 } ftnote;
@@ -129,18 +131,18 @@ typedef struct ftsong {
   ftnote pattern[MAX_PATTERNS][CHANNEL_COUNT][MAX_ROWS];
   uint8_t pattern_used[MAX_PATTERNS][CHANNEL_COUNT];
   int pattern_length[MAX_PATTERNS][CHANNEL_COUNT];
-  int effect_columns[CHANNEL_COUNT];
-  int loop_to;
+  int effect_columns[CHANNEL_COUNT]; // number of effect columns
+  int loop_to;                       // frame to insert the segno at, or -1 for no looping
 
-  // Song status information
+  // Song status information for parsing purposes
   int pattern_id, frames;
 } ftsong;
 
 // an instument envelope
 typedef struct ftmacro {
-  uint8_t length, loop, release;
-  char arp_type;
-  char sequence[MAX_MACRO_LEN];
+  int8_t length, loop, release;
+  int8_t arp_type; // relative/absolute? not used by ft2pently
+  int8_t sequence[MAX_MACRO_LEN];
   uint8_t decay_rate;   // if 0, decay isn't used
   uint8_t decay_volume; // starting volume to use for decay
   uint8_t decay_index;  // index decay starts 
@@ -148,6 +150,7 @@ typedef struct ftmacro {
 
 //////////////////// functions ////////////////////
 
+// creates a note with some given information
 ftnote make_note(uint8_t octave, char note, int8_t instrument) {
   ftnote new_note;
   memset(&new_note, 0, sizeof(new_note));
@@ -157,12 +160,18 @@ ftnote make_note(uint8_t octave, char note, int8_t instrument) {
   return new_note;
 }
 
+// returns 1 for channels that have notes and a pitch
+static inline int channel_is_pitched(int channel) {
+  return channel != CH_DPCM && channel != CH_NOISE;
+}
+
+// convert a note and an octave into a semitone number
 int note_to_semitone(char note, int octave) {
   return (strchr(scale, note)-scale)+(octave*NUM_SEMITONES);
 }
 
+// convert the number back to a note name and octave
 void semitone_to_note(int semitone, char *note, uint8_t *octave) {
-  // convert the number back to a note name and octave
   *note = scale[semitone % NUM_SEMITONES];
   *octave = semitone / NUM_SEMITONES;
 }
@@ -284,6 +293,7 @@ void error(int stop, const char *fmt, ...) {
       exit(-1);
 }
 
+// creates a string that describes a location in a song
 const char *error_location(ftsong *the_song, int channel, int pattern, int row) {
   static char buffer[200];
 
@@ -339,9 +349,10 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
 
     // do not use decay if it would interfere with the arpeggio or duty envelopes
     if(decay_rate && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
-                                                        (instrument_macro[MS_ARPEGGIO][num_macro_arp].loop == 255)))
+                                                        (instrument_macro[MS_ARPEGGIO][num_macro_arp].loop == -1)))
                   && (instrument[i][MS_DUTY] < 0 || ((instrument_macro[MS_DUTY][num_macro_duty].length < decay_index) &&
-                                                    (instrument_macro[MS_DUTY][num_macro_duty].loop == 255)))) {
+                                                    (instrument_macro[MS_DUTY][num_macro_duty].loop == -1)))) {
+      // if a decay can be used, cut off the volume envelope at the decay point and write the decay command
       macro.sequence[decay_index] = decay_volume;
       macro.length = decay_index + 1;
       fprintf(file, "  decay %i\r\n", decay_rate);
@@ -415,7 +426,7 @@ void write_time(FILE *file, int rows) {
 
   fprintf(file, "%i", measure+1);
   if(beat || row) {
-    fprintf(file, ":%i:%i", beat+1, row+1);
+    fprintf(file, ":%i:%i", beat+1, row);
   }
 }
 
@@ -447,10 +458,11 @@ void write_pattern(FILE *file, int id, int channel) {
 
   // generate pattern name and specify absolute octaves
   fprintf(file, "\r\n  pattern pat_%i_%i_%i", song_num, channel, id);
-  if(channel != CH_DPCM && channel != CH_NOISE)
+  if(channel_is_pitched(channel))
     fprintf(file, " with %s on %s\r\n    absolute", instrument_name[instrument], chan_name[channel]);
   fprintf(file, "\r\n    ");
 
+  // for each row
   int row = 0;
   while(row < xsong.pattern_length[id][channel]) {
     char this_note = pattern[row].note;
@@ -466,7 +478,7 @@ void write_pattern(FILE *file, int id, int channel) {
     // write any instrument changes
     if(isalnum(this_note) && pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
       instrument = pattern[row].instrument;
-      if(channel != CH_DPCM && channel != CH_NOISE)
+      if(channel_is_pitched(channel))
         fprintf(file, " @%s ", instrument_name[instrument]);
     }
 
@@ -495,10 +507,12 @@ void write_pattern(FILE *file, int id, int channel) {
           slur = pattern[row].param[i] != 0;
           break;
         case FX_ARP:
-          fprintf(file, "@EN%.2x ", pattern[row].param[i]);
+          if(channel_is_pitched(channel))
+            fprintf(file, "EN%.2x ", pattern[row].param[i]);
           break;
         case FX_VIBRATO:
-          fprintf(file, "@MP%x ", pattern[row].param[i] & 15);
+          if(channel_is_pitched(channel))
+            fprintf(file, "MP%x ", pattern[row].param[i] & 15);
           break;
         case FX_DELAYCUT:
           delay_cut = pattern[row].param[i];
@@ -518,7 +532,7 @@ void write_pattern(FILE *file, int id, int channel) {
     // write note
     if(this_note == '-' || !this_note) {
       fprintf(file, "r");
-    } else if(channel != CH_DPCM && channel != CH_NOISE) {
+    } else if(channel_is_pitched(channel)) {
       // just write normal notes
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
 
@@ -651,7 +665,7 @@ int main(int argc, char *argv[]) {
                // skip this note altogether
                continue;
              }
-             if(channel != CH_NOISE && channel != CH_DPCM)
+             if(channel_is_pitched(channel))
                instrument_used[read_instrument] = 1;
              note.instrument = read_instrument;
            } else { // if it's not, go back and find it
@@ -824,7 +838,7 @@ int main(int argc, char *argv[]) {
       check_range("macro setting type", setting, 0, MACRO_SET_COUNT, NULL);
       int id = strtol(arg, &arg, 10);
       check_range("macro id", id, 0, MAX_INSTRUMENTS, NULL);
-      instrument_macro[setting][id].loop = strtol(arg, &arg, 10);    // -1 gets set as 255
+      instrument_macro[setting][id].loop = strtol(arg, &arg, 10);
       instrument_macro[setting][id].release = strtol(arg, &arg, 10);
       instrument_macro[setting][id].length = 0;
       instrument_macro[setting][id].arp_type = strtol(arg, &arg, 10);
@@ -838,7 +852,7 @@ int main(int argc, char *argv[]) {
       }
 
       // if auto decay is enabled and this is a volume envelope, try to find a decay envelope
-      if(decay_enabled && setting == MS_VOLUME && instrument_macro[setting][id].loop == 255 &&
+      if(decay_enabled && setting == MS_VOLUME && instrument_macro[setting][id].loop == -1 &&
         !instrument_macro[setting][id].sequence[instrument_macro[setting][id].length-1]) {
 
         int stop = 0;
@@ -1015,7 +1029,7 @@ int main(int argc, char *argv[]) {
                 unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
                 if(num_macro_arp >= MAX_INSTRUMENTS) {
                   // no arpeggio set, so make one
-                  ftmacro new_macro = {1, 255, 255, 0, {0}, 0, 0, 0};
+                  ftmacro new_macro = {1, -1, -1, 0, {0}, 0, 0, 0};
                   instrument_macro[MS_ARPEGGIO][MAX_INSTRUMENTS-1] = new_macro;
                   instrument[i][MS_ARPEGGIO] = MAX_INSTRUMENTS-1;
                   num_macro_arp = MAX_INSTRUMENTS - 1;
