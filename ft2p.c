@@ -24,14 +24,13 @@
 #include <string.h>
 #include <stdarg.h>
 
-// max values for some things
+// maximum values, used for array sizes
 #define MAX_EFFECTS     4
 #define MAX_ROWS        256
 #define MAX_FRAMES      128  // real max is 128
 #define MAX_PATTERNS    128  // real max is 128
 #define MAX_INSTRUMENTS 64   // pently limit is 256/5
 #define MAX_MACRO_LEN   255  // real max is like 254?
-#define MAX_OCTAVE      7
 #define NUM_OCTAVES     7
 #define NUM_SEMITONES   12
 #define MAX_SFX         64
@@ -197,7 +196,7 @@ void check_range(const char *name, int value, int low, int high, const char *loc
 }
 
 // like strncpy but good
-void strlcpy(char *Destination, const char *Source, int MaxLength) {
+void strlcpy(char *Destination, const char *Source, int MaxLength) { 
   // MaxLength is directly from sizeof() so it includes the zero
   int SourceLen = strlen(Source);
   if((SourceLen+1) < MaxLength)
@@ -231,9 +230,9 @@ char *sanitize_name(char *outbuf, const char *input, int length) {
   while(*input) {
     if(isalnum(*input))    // copy directly if alphanumeric
       *(output++) = *input;
-    else if(*input == ' ' || *input == '-' || *input == '_') {
+    else if(*input == ' ' || *input == '-' || *input == '_') { // change certain characters to underscores
       *(output++) = '_';
-    } else {               // escape it otherwise
+    } else {               // escape other characters into their hexadecimal code
       sprintf(hex, "%.2x", *input);
       strcpy(output, hex);
       output += 2;
@@ -246,9 +245,9 @@ char *sanitize_name(char *outbuf, const char *input, int length) {
   return outbuf;
 }
 
-// return 1 iff a string starts with another specific string
+// return 1 if a string starts with another specific string
 int starts_with(char *string, const char *start, char **arg) {
-  // also set a pointer to the text after "start"
+  // optionally, set a pointer to the spot in the string after the text being matched against
   if(arg)
     *arg = string+strlen(start);
   return !memcmp(string, start, strlen(start));
@@ -262,22 +261,28 @@ char *skip_to_number(char *string) {
 }
 
 //////////////////// global variables ////////////////////
-ftsong song, xsong;
+ftsong song;  // song being parsed
+ftsong xsong; // song being exported
+
+// module parsing state
 int song_num = 0, sfx_num = 0;
 int8_t instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
 uint8_t instrument_used[MAX_INSTRUMENTS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
 uint16_t instrument_noise[MAX_INSTRUMENTS]; // each bit in each 16-bit value corresponds to a needed frequency
-const char *in_filename, *out_filename;
 char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
-int decay_enabled = 0;
-int auto_noise = 0;
-int hex_rows = 0;
-char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN];
-int strict = 0;
 int duplicate_name_counter = 0;
+
+// export options
+int decay_enabled = 0;    // use the decay feature
+int auto_noise = 0;       // automatically convert noise instruments to drums
+int hex_rows = 0;         // display row numbers in hex instead of decimal
+int strict = 0;           // turn warnings into errors
+int dotted_durations = 0; // use dotted durations in the output file
+char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN]; // pre-calculated decay tables
+const char *in_filename, *out_filename;
 
 // displays a warning or an error
 void error(int stop, const char *fmt, ...) {
@@ -339,13 +344,14 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
   unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
   unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
 
-  int decay_rate = 0, decay_volume = 0, decay_index = 0;
 
+  // write the envelopes the instrument has
   if(instrument[i][MS_VOLUME] >= 0) {
+    // read the decay information first to find out if the instrument has an automatic decay
     ftmacro macro = instrument_macro[MS_VOLUME][num_macro_volume];
-    decay_rate   = macro.decay_rate;
-    decay_volume = macro.decay_volume;
-    decay_index  = macro.decay_index;
+    int decay_rate   = macro.decay_rate;
+    int decay_volume = macro.decay_volume;
+    int decay_index  = macro.decay_index;
 
     // do not use decay if it would interfere with the arpeggio or duty envelopes
     if(decay_rate && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
@@ -392,7 +398,7 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
 
 // converts the number of rows to a Pently note duration
 void write_duration(FILE *file, int duration, int slur) {
-  const char *durations[] = {
+  const char *long_duration[] = {
     /* 1 */ "16",
     /* 2 */ "8",
     /* 3 */ "8 w16",
@@ -410,6 +416,26 @@ void write_duration(FILE *file, int duration, int slur) {
     /*15 */ "2 w4 w8 w16",
     /*16 */ "1"
   };
+  const char *dotted_duration[] = {
+    /* 1 */ "16",
+    /* 2 */ "8",
+    /* 3 */ "8.",
+    /* 4 */ "4",
+    /* 5 */ "4 w16",
+    /* 6 */ "4.",
+    /* 7 */ "4. w16",
+    /* 8 */ "2",
+    /* 9 */ "2 w16",
+    /*10 */ "2 w8",
+    /*11 */ "2 w8.",
+    /*12 */ "2.",
+    /*13 */ "2. w16",
+    /*14 */ "2. w8",
+    /*15 */ "2. w8.",
+    /*16 */ "1"
+  };
+  const char **durations = dotted_durations ? dotted_duration : long_duration;
+
   duration--;
   fprintf(file, "%s%s ", durations[duration%16], slur?"~":"");
   while(duration > 16) {
@@ -479,7 +505,7 @@ void write_pattern(FILE *file, int id, int channel) {
     if(isalnum(this_note) && pattern[row].instrument >= 0 && pattern[row].instrument != instrument) {
       instrument = pattern[row].instrument;
       if(channel_is_pitched(channel))
-        fprintf(file, " @%s ", instrument_name[instrument]);
+        fprintf(file, "@%s ", instrument_name[instrument]);
     }
 
     // write volume changes
@@ -515,10 +541,8 @@ void write_pattern(FILE *file, int id, int channel) {
             fprintf(file, "MP%x ", pattern[row].param[i] & 15);
           break;
         case FX_DELAYCUT:
-          delay_cut = pattern[row].param[i];
           if(this_note) {
-            // next note should be empty
-            pattern[row+1].note = '-';
+            delay_cut = pattern[row].param[i];
             break;
           }
           // if it's an empty row, turn it into a delay and insert a note cut right here instead of at the next note
@@ -552,7 +576,7 @@ void write_pattern(FILE *file, int id, int channel) {
       fprintf(file, "%s", drum_name[octave][scale_note-scale]);
     }
     if(delay_cut && isalpha(this_note)) {
-      fprintf(file, "%ig r16 w", delay_cut);
+      fprintf(file, "%ig r", delay_cut);
       delay_cut = 0;
     }
     write_duration(file, duration, slur|pattern[row].slur);
@@ -583,6 +607,12 @@ int main(int argc, char *argv[]) {
       strict = 1;
     if(!strcmp(argv[i], "-hexrow"))
       hex_rows = 1;
+    if(!strcmp(argv[i], "-dotted"))
+      dotted_durations = 1;
+    if(!strcmp(argv[i], "-autonoise"))
+      auto_noise = 1;
+    if(!strcmp(argv[i], "-autodecay"))
+      auto_decay = 1;
   }
 
   // complain if input or output not specified
@@ -608,6 +638,7 @@ int main(int argc, char *argv[]) {
 
     if(starts_with(buffer, "TRACK ", &arg)) {
       if(song_num) {
+        // copy song to xsong, because song is going to be reset for the new track
         need_song_export = 1;
         xsong = song;
       }
@@ -711,13 +742,15 @@ int main(int argc, char *argv[]) {
            // some effects call for processing during pattern reading
            ftnote *next_note = &song.pattern[song.pattern_id][channel][row+1];
            switch(*effect) {
-//             case FX_DELAYCUT: // fix for delaying a cut on an empty row
-//               if(!note.note)  // (which I don't think works yet??)
-//                 note.note = '~';
-//               break;
+             case FX_DELAYCUT:
+               if(!note.param[j]) { // S00 is identical to a note cut
+                 note.note = '-';
+                 note.effect[j] = '.'; // turn effect off
+               }
+               break;
              case FX_SLUR:
                if(note.param[j]) // set slur on previous note
-                 for(int k=row-1; k >= 0; k--)
+                 for(int k=row-1; k >= 0; k--) // find previous note
                    if(song.pattern[song.pattern_id][channel][k].note) {
                      song.pattern[song.pattern_id][channel][k].slur = 1;
                      break;

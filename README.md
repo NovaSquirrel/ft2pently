@@ -98,14 +98,20 @@ A volume envelope may contain a decay and nothing else, if you don't want to use
 
 Important note: Auto decay will not activate for a given instrument if it would interfere with the duty and/or arpeggio envelopes. At the point in the volume envelope where the decay envelope starts, the duty and arpeggio envelopes must have already completed. This also means that those envelopes cannot be looped.
 
+Command line arguments
+----------------------
+By default, ft2pently will only warn about unsupported effects. To make it give an error and stop instead, add the `-strict` flag.
+
+Errors will display row numbers in decimal by default, but you can choose hex row numbers with `-hexrow`.
+
+Auto noise and auto decay can be turned on from the command line with `-autonoise` and `-autodecay` if you prefer that over comments.
+
+`-dotted` will make ft2pently use '.'s when writing durations.
+
 Converting the song
 -------------------
 In Famitracker, either use `File -> Export text` from the menu, or `famitracker.exe song.ftm -export song.txt` from a terminal to make a text export of the song.
 
 Now, to run ft2pently: `ft2p -i song.txt -o song.pently`
-
-By default, ft2pently will only warn about unsupported effects. To make it give an error and stop instead, add the `-strict` flag.
-
-Errors will display row numbers in decimal by default, but you can choose hex row numbers with `-hexrow`.
 
 This output will need to be run through `pentlyas` to result in something the Pently engine can use.
