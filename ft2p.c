@@ -37,6 +37,8 @@
 #define MAX_DECAY_START 15   // starting volume
 #define MAX_DECAY_RATE  16   // decay rate
 #define MAX_DECAY_LEN   256  // actually goes up to 224 or something but this is to be safe
+#define MAX_SONGS       64
+#define SONG_NAME_LEN   32
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
@@ -121,8 +123,8 @@ typedef struct ftnote {
 // a song and its patterns
 typedef struct ftsong {
   // Explicitly stated song information
-  char real_name[32]; // name to display for errors
-  char name[32];      // sanitized name for the actual file
+  char real_name[SONG_NAME_LEN]; // name to display for errors
+  char name[SONG_NAME_LEN];      // sanitized name for the actual file
   int rows, speed, tempo;
 
   // Buffers to hold song information
@@ -274,6 +276,7 @@ uint16_t instrument_noise[MAX_INSTRUMENTS]; // each bit in each 16-bit value cor
 char drum_name[NUM_OCTAVES][NUM_SEMITONES][16];
 soundeffect soundeffects[MAX_SFX];
 int duplicate_name_counter = 0;
+char song_name[MAX_SONGS][SONG_NAME_LEN]; // exists solely to check for duplicates
 
 // export options
 int decay_enabled = 0;    // use the decay feature
@@ -343,7 +346,6 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
   unsigned int num_macro_volume = (unsigned)instrument[i][MS_VOLUME];
   unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
   unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
-
 
   // write the envelopes the instrument has
   if(instrument[i][MS_VOLUME] >= 0) {
@@ -595,6 +597,7 @@ int main(int argc, char *argv[]) {
   memset(&instrument_name, 0, sizeof(instrument_name));
   memset(&instrument_noise, 0, sizeof(instrument_noise));
   memset(&drum_name, 0, sizeof(drum_name));
+  memset(&song_name, 0, sizeof(song_name));
   memset(&soundeffects, 0, sizeof(soundeffects));
 
   // read arguments
@@ -612,7 +615,7 @@ int main(int argc, char *argv[]) {
     if(!strcmp(argv[i], "-autonoise"))
       auto_noise = 1;
     if(!strcmp(argv[i], "-autodecay"))
-      auto_decay = 1;
+      decay_enabled = 1;
   }
 
   // complain if input or output not specified
@@ -651,8 +654,20 @@ int main(int argc, char *argv[]) {
       song.speed = strtol(arg, &arg, 10);
       song.tempo = strtol(arg, &arg, 10);
       arg = strchr(arg, '\"');
+
       strlcpy(song.real_name, arg+1, sizeof(song.real_name));
       sanitize_name(song.name, arg+1, sizeof(song.name));
+      strlcpy(song_name[song_num-1], song.name, SONG_NAME_LEN);
+
+      // check for and fix duplicate song names
+      for(i=0;i<song_num-1;i++) {
+        if(!strcmp(song.name, song_name[i])) {
+          sprintf(buffer, "%s__%i", song.name, duplicate_name_counter++);
+          error(0, "Duplicate song name (%s), renaming to \"%s\"", song.name, buffer);
+          strlcpy(song.name, buffer, sizeof(song.name));
+          break;
+        }
+      }
     }
 
     else if(starts_with(buffer, "PATTERN ", &arg)) {
@@ -682,7 +697,12 @@ int main(int argc, char *argv[]) {
  
          note.instrument = -1;
 
-         if(line[2] != '.') {
+         if(line[2] == '=') { // note releases are not supported, so degrade to note cut or 
+           if(channel_is_pitched(channel))
+             note.note = '-';
+           else
+             note.note = 0;
+         } else if(line[2] != '.') { // will catch note cuts too
            // sharp note are uppercase
            note.note = (line[3]=='#')?toupper(line[2]):tolower(line[2]);
            // octave will be garbage for note cuts and noise notes, but that's OK
@@ -921,7 +941,7 @@ int main(int argc, char *argv[]) {
          if(!strcmp(instrument_name[i], instrument_name[id])) {
            char temp[20];
            duplicate_name_counter++;
-           sprintf(temp, "___%i", duplicate_name_counter);
+           sprintf(temp, "__%i", duplicate_name_counter);
            strcat(instrument_name[id], temp);
            error(0, "Duplicate instrument name (%s), renaming to \"%s\"", instrument_name[i], instrument_name[id]);
            break;
