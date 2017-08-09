@@ -822,9 +822,9 @@ int main(int argc, char *argv[]) {
             fputc(c, output_file);
         }
         fclose(included);
-      } else if(strcmp(arg, "auto noise")) {
+      } else if(!strcmp(arg, "auto noise")) {
         auto_noise = 1;
-      } else if(strcmp(arg, "auto decay")) {
+      } else if(!strcmp(arg, "auto decay")) {
         // generate decay tables
         decay_enabled = 1;
         for(i=0;i<MAX_DECAY_START;i++)
