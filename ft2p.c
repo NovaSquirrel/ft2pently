@@ -539,8 +539,20 @@ void write_pattern(FILE *file, int id, int channel) {
             fprintf(file, "EN%.2x ", pattern[row].param[i]);
           break;
         case FX_VIBRATO:
-          if(channel_is_pitched(channel))
-            fprintf(file, "MP%x ", pattern[row].param[i] & 15);
+          if(channel_is_pitched(channel)) {
+            switch(pattern[row].param[i] & 15) {
+              case 0:
+                fprintf(file, "MP0 ");
+              case 1: case 2:
+                fprintf(file, "MP1 ");
+              case 3: case 4:
+                fprintf(file, "MP2 ");
+              case 5: case 6:
+                fprintf(file, "MP3 ");
+              default:
+                fprintf(file, "MP4 ");
+            }
+          }
           break;
         case FX_DELAYCUT:
           if(this_note) {
