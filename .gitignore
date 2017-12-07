@@ -93,3 +93,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 *.zip
+
+# Unignore the example files
+!example/*.ftm
+!example/*.pently
