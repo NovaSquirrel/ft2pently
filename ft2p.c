@@ -498,7 +498,7 @@ void write_pattern(FILE *file, int id, int channel) {
 
     // find the next note
     for(next = row+1; next < xsong.pattern_length[id][channel]; next++)
-      if(pattern[next].note)
+      if(pattern[next].note || pattern[next].volume)
         break;
     // the distance between this note and the next note is the duration
     int duration = next-row;
@@ -568,9 +568,12 @@ void write_pattern(FILE *file, int id, int channel) {
     }
 
     // write note
-    if(this_note == '-' || !this_note) {
-      fprintf(file, "r");
-    } else if(channel_is_pitched(channel)) {
+    if(this_note == '-' || !this_note) { // no note to write?
+      if(pattern[row].volume)
+        fprintf(file, "w");
+      else
+        fprintf(file, "r");
+    } else if(channel_is_pitched(channel)) { // a note
       // just write normal notes
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
 
@@ -700,8 +703,10 @@ int main(int argc, char *argv[]) {
          arg++;
 
          // skip if the note is already filled in
-         if(song.pattern[song.pattern_id][channel][row].note)
+         if(song.pattern[song.pattern_id][channel][row].note) {
+           puts("skipping");
            continue;
+         }
 
          // read note info
          ftnote note;
@@ -709,7 +714,29 @@ int main(int argc, char *argv[]) {
  
          note.instrument = -1;
 
-         if(line[2] == '=') { // note releases are not supported, so degrade to note cut or 
+         // volume column
+         if(line[9] != '.') {
+           int volume = VOL_SAME;
+           int digit = strtol(line+9, NULL, 16);
+           if(digit < 6)
+             volume = VOL_PP;
+           else if(digit <= 9)
+             volume = VOL_MP;
+           else if(digit <= 12)
+             volume = VOL_MF;
+           else
+             volume = VOL_FF;
+           int last_volume = VOL_SAME;
+           for(j=row-1; j>=0; j--)
+             if(song.pattern[song.pattern_id][channel][j].volume) {
+               last_volume = song.pattern[song.pattern_id][channel][j].volume;
+               break;
+             }
+           if(volume != last_volume)    
+             note.volume = volume;
+         }
+
+         if(line[2] == '=') { // note releases are not supported, so degrade to note cut or just nothing
            if(channel_is_pitched(channel))
              note.note = '-';
            else
@@ -737,28 +764,6 @@ int main(int argc, char *argv[]) {
                  note.instrument = song.pattern[song.pattern_id][channel][j].instrument;
                  break;
                }
-           }
-
-           // volume column
-           if(line[9] != '.') {
-             int volume = VOL_SAME;
-             int digit = strtol(line+9, NULL, 16);
-             if(digit < 6)
-               volume = VOL_PP;
-             else if(digit <= 9)
-               volume = VOL_MP;
-             else if(digit <= 12)
-               volume = VOL_MF;
-             else
-               volume = VOL_FF;
-             int last_volume = VOL_SAME;
-             for(j=row-1; j>=0; j--)
-               if(song.pattern[song.pattern_id][channel][j].volume) {
-                 last_volume = song.pattern[song.pattern_id][channel][j].volume;
-                 break;
-               }
-             if(volume != last_volume)    
-               note.volume = volume;
            }
          }
 
