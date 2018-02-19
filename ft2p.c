@@ -1,7 +1,7 @@
 /*
  * ft2pently
  *
- * Copyright (C) 2016-2017 NovaSquirrel
+ * Copyright (C) 2016-2018 NovaSquirrel
  *
  * This program is free software: you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -568,11 +568,10 @@ void write_pattern(FILE *file, int id, int channel) {
     }
 
     // write note
-    if(this_note == '-' || !this_note) { // no note to write?
-      if(pattern[row].volume)
-        fprintf(file, "w");
-      else
+    if(this_note == '-') { // note cut
         fprintf(file, "r");
+    } else if(!this_note) { // no not
+        fprintf(file, "w");
     } else if(channel_is_pitched(channel)) { // a note
       // just write normal notes
       fprintf(file, "%c%s", tolower(this_note), isupper(this_note)?"#":"");
