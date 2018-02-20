@@ -341,8 +341,14 @@ void write_octave(FILE *file, int octave) {
       fputc(',', file);
 }
 
+// flags for write_instrument
+enum {
+  ABSOLUTE_PITCH = 1,
+  ALLOW_DECAY = 2,
+};
+
 // writes an instrument's envelopes
-void write_instrument(FILE *file, int i, int absolute_pitch) {
+void write_instrument(FILE *file, int i, int flags) {
   unsigned int num_macro_volume = (unsigned)instrument[i][MS_VOLUME];
   unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
   unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
@@ -350,13 +356,15 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
   // write the envelopes the instrument has
   if(instrument[i][MS_VOLUME] >= 0) {
     // read the decay information first to find out if the instrument has an automatic decay
+    // (and make a copy of the macro that can be modified without changing the original)
     ftmacro macro = instrument_macro[MS_VOLUME][num_macro_volume];
     int decay_rate   = macro.decay_rate;
     int decay_volume = macro.decay_volume;
     int decay_index  = macro.decay_index;
 
-    // do not use decay if it would interfere with the arpeggio or duty envelopes
-    if(decay_rate && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
+    // do not use decay if it would interfere with the arpeggio or duty envelopes, or if disallowed
+    if((flags & ALLOW_DECAY)
+                  && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
                                                         (instrument_macro[MS_ARPEGGIO][num_macro_arp].loop == -1)))
                   && (instrument[i][MS_DUTY] < 0 || ((instrument_macro[MS_DUTY][num_macro_duty].length < decay_index) &&
                                                     (instrument_macro[MS_DUTY][num_macro_duty].loop == -1)))) {
@@ -376,7 +384,7 @@ void write_instrument(FILE *file, int i, int absolute_pitch) {
     ftmacro *macro = &instrument_macro[MS_ARPEGGIO][num_macro_arp];
     fprintf(file, "  pitch ");
 
-    if(absolute_pitch) { // Pently sfx pitch envelopes require music notes, not semitone numbers
+    if(flags & ABSOLUTE_PITCH) { // Pently sfx pitch envelopes require music notes, not semitone numbers
       int j;
       for(j=0; j<macro->length; j++) {
         if(j == macro->loop)
@@ -985,13 +993,15 @@ int main(int argc, char *argv[]) {
         if(channel == CH_SQUARE1)
           channel_name = "pulse";
         fprintf(output_file, "\r\nsfx %s on %s\r\n", soundeffects[i].name, channel_name);
-        write_instrument(output_file, instrument, channel != CH_NOISE);
+
+        // use absolute pitch for non-noise; decay disallowed
+        write_instrument(output_file, instrument, (channel != CH_NOISE)?ABSOLUTE_PITCH:0);
       }
       // write instruments
       for(i=0; i<MAX_INSTRUMENTS; i++)
         if(instrument_used[i]) {
           fprintf(output_file, "\r\ninstrument %s\r\n", instrument_name[i]);
-          write_instrument(output_file, i, 0);
+          write_instrument(output_file, i, ALLOW_DECAY);
         }
       need_song_export = 1;
     }
@@ -1117,7 +1127,7 @@ int main(int argc, char *argv[]) {
                 ftmacro old = *arp_macro;
                 for(k=0; k<arp_macro->length; k++)
                   arp_macro->sequence[k] = (arp_macro->sequence[k]+j)&15;
-                write_instrument(output_file, i, 0);
+                write_instrument(output_file, i, 0); // disallow decay
                 *arp_macro = old;
 
                 // define a drum for the frequency
