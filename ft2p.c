@@ -848,7 +848,7 @@ int main(int argc, char *argv[]) {
             int volume = (i+1)<<4;
             int value, index = 0, decay = j+1;
             
-            while(volume >= 0x10) {
+            while(volume >= 0x08) {
               volume -= decay;
               value = ((volume+8)>>4);
               decay_envelope[i][j][index++] = value;
