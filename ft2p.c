@@ -257,7 +257,7 @@ int starts_with(char *string, const char *start, char **arg) {
 
 // increases a pointer until it gets to a digit or a dash
 char *skip_to_number(char *string) {
-  while(*string && (!isdigit(*string) || *string=='-'))
+  while(*string && !isdigit(*string) && *string!='-')
     string++;
   return string;
 }
