@@ -576,14 +576,19 @@ void write_pattern(FILE *file, int id, int channel) {
             switch(pattern[row].param[i] & 15) {
               case 0:
                 fprintf(file, "MP0 ");
+                break;
               case 1: case 2:
                 fprintf(file, "MP1 ");
+                break;
               case 3: case 4:
                 fprintf(file, "MP2 ");
+                break;
               case 5: case 6:
                 fprintf(file, "MP3 ");
+                break;
               default:
                 fprintf(file, "MP4 ");
+                break;
             }
           }
           break;
