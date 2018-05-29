@@ -39,6 +39,7 @@
 #define MAX_DECAY_LEN   256  // actually goes up to 224 or something but this is to be safe
 #define MAX_SONGS       64
 #define SONG_NAME_LEN   32
+#define MAX_DRUMS       25
 
 //////////////////// constants ////////////////////
 const char *scale = "cCdDefFgGaAb";
@@ -270,6 +271,10 @@ ftsong xsong; // song being exported
 int song_num = 0, sfx_num = 0;
 int8_t instrument[MAX_INSTRUMENTS][MACRO_SET_COUNT];
 uint8_t instrument_used[MAX_INSTRUMENTS];
+uint8_t instrument_ignore[MAX_INSTRUMENTS];
+int num_auto_drums = 0;
+uint8_t auto_drum_noise[MAX_DRUMS];
+uint8_t auto_drum_tri[MAX_DRUMS];
 ftmacro instrument_macro[MACRO_SET_COUNT][MAX_INSTRUMENTS];
 char instrument_name[MAX_INSTRUMENTS][32];
 uint16_t instrument_noise[MAX_INSTRUMENTS]; // each bit in each 16-bit value corresponds to a needed frequency
@@ -281,8 +286,10 @@ char song_name[MAX_SONGS][SONG_NAME_LEN]; // exists solely to check for duplicat
 // export options
 int decay_enabled = 0;    // use the decay feature
 int auto_noise = 0;       // automatically convert noise instruments to drums
+int auto_dual_drums = 0;  // automatically convert fixed arpeggio noise instruments to drums (with triangle part)
 int hex_rows = 0;         // display row numbers in hex instead of decimal
 int strict = 0;           // turn warnings into errors
+int tri_sxx_to_cut = 0;   // convert delayed triangle note cuts to regular note cuts
 int dotted_durations = 0; // use dotted durations in the output file
 char decay_envelope[MAX_DECAY_START][MAX_DECAY_RATE][MAX_DECAY_LEN]; // pre-calculated decay tables
 const char *in_filename, *out_filename;
@@ -317,6 +324,21 @@ const char *error_location(ftsong *the_song, int channel, int pattern, int row) 
       sprintf(buffer, "[%s - %s pattern %i row %i]", the_song->real_name, chan_name[channel], pattern, row);
   }
   return buffer;
+}
+
+// finds a auto/dual drum automatically, or creates a new one if necessary
+uint8_t find_auto_drum(uint8_t noise, uint8_t triangle) {
+  for(int i=0; i<num_auto_drums; i++) {
+    if(auto_drum_noise[i] == noise && auto_drum_tri[i] == triangle)
+      return i;
+  }
+  if(num_auto_drums == MAX_DRUMS)
+    error(1, "Maximum number of drums is %i", MAX_DRUMS);
+
+  auto_drum_noise[num_auto_drums] = noise;
+  auto_drum_tri[num_auto_drums] = triangle;
+
+  return num_auto_drums++;
 }
 
 // writes the numbers for an instrument's envelope, including the loop point
@@ -476,7 +498,10 @@ void write_tempo(FILE *file, int speed, int tempo) {
 
 // writes a pattern to the output file
 void write_pattern(FILE *file, int id, int channel) {
-  if((channel == CH_NOISE && !auto_noise) || (channel == CH_DPCM && auto_noise))
+  // skip over noise channel if auto_noise and auto_dual_drums are both off
+  // skip over DPCM channel if auto_noise or auto_dual_drums are on
+  if((channel == CH_NOISE && !(auto_noise || auto_dual_drums)) ||
+     (channel == CH_DPCM && (auto_noise || auto_dual_drums)))
     return;
 
   ftnote *pattern = xsong.pattern[id][channel];
@@ -587,13 +612,23 @@ void write_pattern(FILE *file, int id, int channel) {
       // shift the octave in the direction needed
       write_octave(file, octave);
     } else if(channel == CH_NOISE) { // noise
-      // for noise, use the instrument name and the note frequency
+      if(auto_dual_drums) { // auto_dual_drums
+        uint8_t noise = instrument;
+        uint8_t triangle = 255; // default to no triangle part
+        if(pattern[row].effect[0] == FX_ATTACK_ON) { // repurposed effect
+          triangle = pattern[row].param[0];
+        }
+        uint8_t drum_no = find_auto_drum(noise, triangle);
+        fprintf(file, "autodrum%i_", drum_no);
+      } else { // auto_noise
+        // for noise, use the instrument name and the note frequency
 
-      // mark frequency as being used
-      char hex[2] = {this_note, 0};
-      instrument_noise[instrument] |= 1 << strtol(hex, NULL, 16);
+        // mark frequency as being used
+        char hex[2] = {this_note, 0};
+        instrument_noise[instrument] |= 1 << strtol(hex, NULL, 16);
 
-      fprintf(file, "%s_%c_", instrument_name[instrument], this_note);
+        fprintf(file, "%s_%c_", instrument_name[instrument], this_note);
+      }
     } else { // DPCM
       // for DPCM: write drum name
       char *scale_note = strchr(scale, this_note);
@@ -615,10 +650,13 @@ int main(int argc, char *argv[]) {
   char buffer[700];
   memset(&instrument, 0, sizeof(instrument));
   memset(&instrument_used, 0, sizeof(instrument_used));
+  memset(&instrument_ignore, 0, sizeof(instrument_ignore));
   memset(&instrument_macro, 0, sizeof(instrument_macro));
   memset(&instrument_name, 0, sizeof(instrument_name));
   memset(&instrument_noise, 0, sizeof(instrument_noise));
   memset(&drum_name, 0, sizeof(drum_name));
+  memset(&auto_drum_noise, 255, sizeof(auto_drum_noise));
+  memset(&auto_drum_tri,   255, sizeof(auto_drum_tri));
   memset(&song_name, 0, sizeof(song_name));
   memset(&soundeffects, 0, sizeof(soundeffects));
 
@@ -636,6 +674,8 @@ int main(int argc, char *argv[]) {
       dotted_durations = 1;
     if(!strcmp(argv[i], "-autonoise"))
       auto_noise = 1;
+    if(!strcmp(argv[i], "-autodualdrums"))
+      auto_dual_drums = 1;
     if(!strcmp(argv[i], "-autodecay"))
       decay_enabled = 1;
   }
@@ -762,7 +802,8 @@ int main(int argc, char *argv[]) {
                // skip this note altogether
                continue;
              }
-             if(channel_is_pitched(channel))
+             // mark used if the note's not ignored (I should just probably actually bail out of parsing the note if it's ignored)
+             if(channel_is_pitched(channel) && !(read_instrument != -1 && instrument_ignore[read_instrument] & (1 << channel)))
                instrument_used[read_instrument] = 1;
              note.instrument = read_instrument;
            } else { // if it's not, go back and find it
@@ -787,7 +828,9 @@ int main(int argc, char *argv[]) {
            ftnote *next_note = &song.pattern[song.pattern_id][channel][row+1];
            switch(*effect) {
              case FX_DELAYCUT:
-               if(!note.param[j]) { // S00 is identical to a note cut
+               if((tri_sxx_to_cut && channel == CH_TRIANGLE) || !note.param[j]) {
+                 // S00 is identical to a note cut
+                 // also cut if using tri_sxx_to_cut
                  note.note = '-';
                  note.effect[j] = '.'; // turn effect off
                }
@@ -823,8 +866,11 @@ int main(int argc, char *argv[]) {
            }
          }
 
-         // finally write the note we made into the pattern
-         song.pattern[song.pattern_id][channel][row] = note;
+         // write the note only if the instrument is not ignored
+         if(!(note.instrument != -1 && instrument_ignore[note.instrument] & (1 << channel))) {
+           // finally write the note we made into the pattern
+           song.pattern[song.pattern_id][channel][row] = note;
+         }
       }
 
     }
@@ -835,6 +881,28 @@ int main(int argc, char *argv[]) {
       if(*arg == '\"')
         arg++;
       char *arg2;
+      if(starts_with(arg, "ignore ", &arg2)) { // ignore instruments on specific channels
+        int instrument_id = 0;
+        int channel_id = 0;
+
+        // separate the channel name and instrument ID
+        char *space = strchr(arg2, ' ');
+        if(!space)
+          error(1, "'ignore' takes two parameters");
+        *space = 0;
+        space = skip_to_number(space+1);
+        if(!isxdigit(*space))
+          error(1, "'ignore' needs an instrument number in hex");
+        instrument_id = strtol(space, NULL, 16);
+
+        while(strcmp(chan_name[channel_id], arg2) && channel_id != CHANNEL_COUNT)
+          channel_id++;
+        if(channel_id == CHANNEL_COUNT)
+          error(1, "'ignore' needs a channel name; use pulse1, pulse2, triangle, noise, drum, or attack");
+
+        printf("ignoring %x on %s\n", instrument_id, chan_name[channel_id]);
+        instrument_ignore[instrument_id] |= 1 << channel_id;
+      }
       if(starts_with(arg, "include ", &arg2)) {
         // import another file into this file
         FILE *included = fopen(arg2, "rb");
@@ -848,6 +916,10 @@ int main(int argc, char *argv[]) {
         fclose(included);
       } else if(!strcmp(arg, "auto noise")) {
         auto_noise = 1;
+      } else if(!strcmp(arg, "auto dual drums")) {
+        auto_dual_drums = 1;
+      } else if(!strcmp(arg, "tri sxx to cut")) {
+        tri_sxx_to_cut = 1;
       } else if(!strcmp(arg, "auto decay")) {
         // generate decay tables
         decay_enabled = 1;
@@ -984,6 +1056,45 @@ int main(int argc, char *argv[]) {
 
     // export things if needed
     if(!strcmp(buffer, "# End of export")) {
+      // write automatic noise+triangle drums if needed
+      if(auto_dual_drums) {
+        for(int j=0; j<MAX_INSTRUMENTS; j++) {
+          // create noise sound effects
+          // for instruments that appear in auto_drum_noise
+          for(int i=0; i<num_auto_drums; i++) {
+            if(auto_drum_noise[i] != j)
+              continue;
+            soundeffects[sfx_num].instrument = j;
+            soundeffects[sfx_num].channel = CH_NOISE;
+            sprintf(soundeffects[sfx_num].name, "autonoise%x_", j);
+            sfx_num++;
+            break;
+          }
+
+          // create triangle sound effects
+          // for instruments that appear in auto_drum_tri
+          for(int i=0; i<num_auto_drums; i++) {
+            if(auto_drum_tri[i] != j)
+              continue;
+            soundeffects[sfx_num].instrument = j;
+            soundeffects[sfx_num].channel = CH_TRIANGLE;
+            sprintf(soundeffects[sfx_num].name, "autotriangle%x_", j);
+            sfx_num++;
+            break;
+          }
+
+        }
+
+        // create drums using both these sound effects
+        for(int i=0; i<num_auto_drums; i++) {
+          printf("%i noise %x, triangle %x\n", i, auto_drum_noise[i], auto_drum_tri[i]);
+          if(auto_drum_tri[i] == 255)
+            fprintf(output_file, "\r\ndrum autodrum%i_ autonoise%x_", i, auto_drum_noise[i]);
+          else
+            fprintf(output_file, "\r\ndrum autodrum%i_ autonoise%x_ autotriangle%x_", i, auto_drum_noise[i], auto_drum_tri[i]);
+        }
+      }
+
       xsong = song;
       // write sound effects
       for(i=0; i<sfx_num; i++) {
@@ -1037,12 +1148,13 @@ int main(int argc, char *argv[]) {
         int min_length = MAX_ROWS; // minimum pattern length in this frame
         for(j=0; j<CHANNEL_COUNT; j++) {
           int pattern = xsong.frame[i][j];
-          if(((!auto_noise && j != CH_NOISE) || (auto_noise && j != CH_DPCM))
+          if(( (!(auto_noise||auto_dual_drums) && j != CH_NOISE)
+             || ((auto_noise||auto_dual_drums) && j != CH_DPCM))
             && xsong.pattern_used[pattern][j]) {
             fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) { // stop channel if it was playing but now it isn't
-            if(j == CH_NOISE)
+            if(j == CH_NOISE || j == CH_DPCM)
               fprintf(output_file, "\r\n  stop drum");
             else
               fprintf(output_file, "\r\n  stop %s", chan_name[j]);
@@ -1064,7 +1176,7 @@ int main(int argc, char *argv[]) {
                   speed = note->param[fx];
                 else
                   tempo = note->param[fx];
-              } else if(note->effect[fx] == FX_ATTACK_ON)
+              } else if(note->effect[fx] == FX_ATTACK_ON && j == CH_ATTACK)
                 attack = note->param[fx];
           }
           if(speed||tempo||(attack>=0)) {
