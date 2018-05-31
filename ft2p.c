@@ -332,6 +332,7 @@ uint8_t find_auto_drum(uint8_t noise, uint8_t triangle) {
     if(auto_drum_noise[i] == noise && auto_drum_tri[i] == triangle)
       return i;
   }
+//  printf("Adding drum combo: noise %x tri %x\n", noise, triangle);
   if(num_auto_drums == MAX_DRUMS)
     error(1, "Maximum number of drums is %i", MAX_DRUMS);
 
@@ -770,7 +771,7 @@ int main(int argc, char *argv[]) {
          if(line[9] != '.') {
            int volume = VOL_SAME;
            int digit = strtol(line+9, NULL, 16);
-           if(digit < 6)
+           if(digit <= 6)
              volume = VOL_PP;
            else if(digit <= 9)
              volume = VOL_MP;
@@ -823,7 +824,7 @@ int main(int argc, char *argv[]) {
          // read effects
          for(j=0; j<song.effect_columns[channel]; j++) {
            // read in the effect type and value
-           char *effect = line+11;
+           char *effect = line+11+4*j;
            if(!strchr(supported_effects, *effect))
              error(0, "unsupported effect (%c) %s", *effect, error_location(&song, channel, song.pattern_id, row));
            note.effect[j] = *effect;
