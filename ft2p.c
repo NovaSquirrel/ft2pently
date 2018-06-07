@@ -1143,7 +1143,7 @@ int main(int argc, char *argv[]) {
         }
 
       // write the frames
-      int channel_playing[CHANNEL_COUNT] = {0, 0, 0, 0, 0, 0};
+      int channel_playing[CHANNEL_COUNT] = {1, 1, 1, auto_noise||auto_dual_drums, !(auto_noise||auto_dual_drums), 0};
       int total_rows = 0;
       for(i=0; i<xsong.frames; i++) {
         fprintf(output_file, "\r\n  at ");;
