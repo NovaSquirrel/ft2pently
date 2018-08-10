@@ -386,7 +386,7 @@ void write_instrument(FILE *file, int i, int flags) {
     int decay_index  = macro.decay_index;
 
     // do not use decay if it would interfere with the arpeggio or duty envelopes, or if disallowed
-    if((decay_enabled && (flags & ALLOW_DECAY))
+    if((decay_rate && decay_enabled && (flags & ALLOW_DECAY))
                   && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
                                                         (instrument_macro[MS_ARPEGGIO][num_macro_arp].loop == -1)))
                   && (instrument[i][MS_DUTY] < 0 || ((instrument_macro[MS_DUTY][num_macro_duty].length < decay_index) &&
