@@ -386,7 +386,7 @@ void write_instrument(FILE *file, int i, int flags) {
     int decay_index  = macro.decay_index;
 
     // do not use decay if it would interfere with the arpeggio or duty envelopes, or if disallowed
-    if((flags & ALLOW_DECAY)
+    if((decay_enabled && (flags & ALLOW_DECAY))
                   && (instrument[i][MS_ARPEGGIO] < 0 || ((instrument_macro[MS_ARPEGGIO][num_macro_arp].length < decay_index) && 
                                                         (instrument_macro[MS_ARPEGGIO][num_macro_arp].loop == -1)))
                   && (instrument[i][MS_DUTY] < 0 || ((instrument_macro[MS_DUTY][num_macro_duty].length < decay_index) &&
@@ -666,6 +666,22 @@ int main(int argc, char *argv[]) {
   memset(&song_name, 0, sizeof(song_name));
   memset(&soundeffects, 0, sizeof(soundeffects));
 
+  // Generate decay tables
+  for(i=0;i<MAX_DECAY_START;i++) {
+    for(j=0;j<MAX_DECAY_RATE;j++) {
+      int volume = (i+1)<<4;
+      int value, index = 0, decay = j+1;
+            
+      while(volume >= 0x08) {
+        volume -= decay;
+        value = ((volume+8)>>4);
+        decay_envelope[i][j][index++] = value;
+      }
+      if(value != 0)
+        decay_envelope[i][j][index++] = 0;
+    }
+  }
+
   // read arguments
   for(i=1; i<argc; i++) {
     if(!strcmp(argv[i], "-i"))
@@ -927,21 +943,7 @@ int main(int argc, char *argv[]) {
       } else if(!strcmp(arg, "tri sxx to cut")) {
         tri_sxx_to_cut = 1;
       } else if(!strcmp(arg, "auto decay")) {
-        // generate decay tables
         decay_enabled = 1;
-        for(i=0;i<MAX_DECAY_START;i++)
-          for(j=0;j<MAX_DECAY_RATE;j++) {
-            int volume = (i+1)<<4;
-            int value, index = 0, decay = j+1;
-            
-            while(volume >= 0x08) {
-              volume -= decay;
-              value = ((volume+8)>>4);
-              decay_envelope[i][j][index++] = value;
-            }
-            if(value != 0)
-              decay_envelope[i][j][index++] = 0;
-          }
       } else if(starts_with(arg, "sfx ", &arg2)) {
         // define a sound effect using an instrument
         soundeffects[sfx_num].instrument = strtol(arg2, &arg2, 16);
