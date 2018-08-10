@@ -4,6 +4,8 @@ Famitracker to Pently music converter
 
 ft2pently takes Famitracker's text exports and converts it to the Pently music engine's MML-like format.
 
+Windows binaries are available [on the release page](https://github.com/NovaSquirrel/ft2pently/releases).
+
 Limitations
 -----------------------
 As with the other music engines that offer conversions from Famitracker, composers have to limit the Famitracker effects they use.
