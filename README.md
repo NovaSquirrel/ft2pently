@@ -8,8 +8,11 @@ Windows binaries are available [on the release page](https://github.com/NovaSqui
 
 Limitations
 -----------------------
-As with the other music engines that offer conversions from Famitracker, composers have to limit the Famitracker effects they use.
+As with the other music engines that offer conversions from Famitracker, composers have to limit the Famitracker effects they use, though Pently is much less limiting than say, Famitone2.
 Most effects are unsupported, as are the "pitch" and "hi-pitch" envelopes.
+If using 0CC Famitracker, you can get a better approximation of how vibrato sounds in Pently by setting it to linear pitch.
+
+See also [https://wiki.nesdev.com/w/index.php/Audio_drivers#Pently this list].
 
 Supported effects:
 * 0xy - Arpeggio
@@ -44,7 +47,14 @@ An instrument WILL return to a decay if it was interrupted during a decay, howev
 Drums
 -----
 
-Pently's drum implementation plays a sound effect on up to two channels. Although DPCM is not supported, good drum sounds can be made by combining a noise channel sound with a triangle channel sound.
+Drums are probably the area where Pently differs from Famitracker's model the most, so ft2pently needs some help to convert them. Instead of a generic noise channel, Pently has a "drum" channel that is based around sound effects, allowing the drum patterns to be stored very efficiently. There is a hard limit on 25 drum types, so keep this in mind!
+
+Alongside the space savings, Pently's drum system allows for drums that use two channels at once, most commonly using noise and triangle together. This allows for very good sounding drums even without DPCM, and unlike the usual case with this strategy you don't need to mess with the triangle channel in Famitracker to "bake" drums into the triangle patterns.
+
+There are a few different choices for how you specify drums in your FTM file:
+* Auto noise: Insert `auto noise` in your FTM file's comments. Compose a noise channel track normally in Famitracker, and each pitch a noise instrument is played at becomes a new Pently drum automatically. Recommended if you just want to quickly get things to work.
+* Auto dual drums: Insert `auto dual drums` in your FTM file's comments. Use `fixed` arpeggio envelopes on your noise and triangle instruments you want to use for drums, create the noise track as normal and insert Jxx effects, where the xx selects a corresponding triangle instrument. Look at Nova the Squirrel's repository for an example of this style.
+* Assigning drums to specific DPCM channel pitches (see next section)
 
 ft2pently can handle drums three different ways. If your game's drums are just noise instruments and you're happy with them, just put `auto noise` in the .ftm's comments and you're done!
 
@@ -80,7 +90,7 @@ Instead of importing drums, you can define drums using instruments. The DPCM cha
 ```
 sfx 01 t tri_kick
 sfx 02 n noise_kick
-drumsfx kick tri_kick noise_kick
+drumsfx tkick tri_kick noise_kick
 drum c3 tkick
 ```
 
