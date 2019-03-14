@@ -897,6 +897,28 @@ int main(int argc, char *argv[]) {
 
     }
 
+    else if(starts_with(buffer, "TITLE ", &arg)) {
+      char *temp = strchr(arg, '\"');
+      if(temp) {
+        arg = temp+1;
+      }
+      fprintf(output_file, "\r\ntitle %s", arg);
+	}
+    else if(starts_with(buffer, "AUTHOR ", &arg)) {
+      char *temp = strchr(arg, '\"');
+      if(temp) {
+        arg = temp+1;
+      }
+      fprintf(output_file, "\r\nauthor %s", arg);
+	}
+    else if(starts_with(buffer, "COPYRIGHT ", &arg)) {
+      char *temp = strchr(arg, '\"');
+      if(temp) {
+        arg = temp+1;
+      }
+      fprintf(output_file, "\r\ncopyright %s\r\n", arg);
+	}
+
     // comments are used for song metadata
     else if(starts_with(buffer, "COMMENT ", &arg)) {
       remove_line_ending(buffer, '\r');
@@ -1125,7 +1147,7 @@ int main(int argc, char *argv[]) {
       need_song_export = 1;
     }
     if(need_song_export) {
-      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n", xsong.name);
+      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n  title %s\r\n", xsong.name, xsong.real_name);
       write_tempo(output_file, xsong.speed, xsong.tempo);
       fprintf(output_file, "\r\n");
 
@@ -1148,7 +1170,7 @@ int main(int argc, char *argv[]) {
       int channel_playing[CHANNEL_COUNT] = {1, 1, 1, auto_noise||auto_dual_drums, !(auto_noise||auto_dual_drums), 0};
       int total_rows = 0;
       for(i=0; i<xsong.frames; i++) {
-        fprintf(output_file, "\r\n  at ");;
+        fprintf(output_file, "\r\n  at ");
         write_time(output_file, total_rows);
         if(xsong.loop_to == i && xsong.loop_to)
           fprintf(output_file, "\r\n  segno");
