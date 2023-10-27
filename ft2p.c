@@ -719,7 +719,11 @@ int main(int argc, char *argv[]) {
 
   // process each line
   int need_song_export = 0;
-  while(fgets(buffer, sizeof(buffer), input_file)) {
+  while(1) {
+    int end_of_file = fgets(buffer, sizeof(buffer), input_file) == NULL;
+    if(end_of_file) // Run through the code with an empty line buffer
+      *buffer = 0;
+
     char *arg;
     remove_line_endings(buffer);
 
@@ -1049,7 +1053,8 @@ int main(int argc, char *argv[]) {
             }
           }
       }
-
+      if(end_of_file)
+        break;
     }
 
     else if(starts_with(buffer, "INST2A03 ", &arg)) {
@@ -1085,7 +1090,7 @@ int main(int argc, char *argv[]) {
     }
 
     // export things if needed
-    if(!strcmp(buffer, "# End of export")) {
+    if(end_of_file) {
       // write automatic noise+triangle drums if needed
       if(auto_dual_drums) {
         for(int j=0; j<MAX_INSTRUMENTS; j++) {
@@ -1235,48 +1240,50 @@ int main(int argc, char *argv[]) {
 
       need_song_export = 0;
     }
-    if(!strcmp(buffer, "# End of export")) {
-      // write automatic noise instruments if needed
-      if(auto_noise)
-        for(i=0; i<MAX_INSTRUMENTS; i++)
-          if(instrument_noise[i])
-            for(j=0; j<16; j++)
-              if(instrument_noise[i] & (1 << j)) {
-                // make a new sound effect for the noise frequency
-                fprintf(output_file, "\r\nsfx noise_%s_%x on noise\r\n", instrument_name[i], j);
 
-                // get the arpeggio envelope, change it and restore it to what it was
-                unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
-                unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
-                if(num_macro_arp >= MAX_INSTRUMENTS) {
-                  // no arpeggio set, so make one
-                  ftmacro new_macro = {1, -1, -1, 0, {0}, 0, 0, 0};
-                  instrument_macro[MS_ARPEGGIO][MAX_INSTRUMENTS-1] = new_macro;
-                  instrument[i][MS_ARPEGGIO] = MAX_INSTRUMENTS-1;
-                  num_macro_arp = MAX_INSTRUMENTS - 1;
-                }
-                int k;
-                if(num_macro_duty < MAX_INSTRUMENTS) {
-                  // if duty is used, wrap all duty values to 0 and 1
-                  // we don't need to worry about saving and restoring because the macros
-                  // won't be needed after the automatic noise drums are written
-                  ftmacro *duty_macro = &instrument_macro[MS_DUTY][num_macro_duty];
-                  for(k=0; k<duty_macro->length; k++)
-                    duty_macro->sequence[k] &= 1;
-                }
-
-                ftmacro *arp_macro = &instrument_macro[MS_ARPEGGIO][num_macro_arp];
-                ftmacro old = *arp_macro;
-                for(k=0; k<arp_macro->length; k++)
-                  arp_macro->sequence[k] = (arp_macro->sequence[k]+j)&15;
-                write_instrument(output_file, i, 0); // disallow decay
-                *arp_macro = old;
-
-                // define a drum for the frequency
-                fprintf(output_file, "\r\ndrum %s_%x_ noise_%s_%x", instrument_name[i], j, instrument_name[i], j);
-              }
-    }
+    if(end_of_file)
+      break;
   }
+
+  // write automatic noise instruments if needed
+  if(auto_noise)
+    for(i=0; i<MAX_INSTRUMENTS; i++)
+      if(instrument_noise[i])
+        for(j=0; j<16; j++)
+          if(instrument_noise[i] & (1 << j)) {
+            // make a new sound effect for the noise frequency
+            fprintf(output_file, "\r\nsfx noise_%s_%x on noise\r\n", instrument_name[i], j);
+
+            // get the arpeggio envelope, change it and restore it to what it was
+            unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
+            unsigned int num_macro_duty   = (unsigned)instrument[i][MS_DUTY];
+            if(num_macro_arp >= MAX_INSTRUMENTS) {
+              // no arpeggio set, so make one
+              ftmacro new_macro = {1, -1, -1, 0, {0}, 0, 0, 0};
+              instrument_macro[MS_ARPEGGIO][MAX_INSTRUMENTS-1] = new_macro;
+              instrument[i][MS_ARPEGGIO] = MAX_INSTRUMENTS-1;
+              num_macro_arp = MAX_INSTRUMENTS - 1;
+            }
+            int k;
+            if(num_macro_duty < MAX_INSTRUMENTS) {
+              // if duty is used, wrap all duty values to 0 and 1
+              // we don't need to worry about saving and restoring because the macros
+              // won't be needed after the automatic noise drums are written
+              ftmacro *duty_macro = &instrument_macro[MS_DUTY][num_macro_duty];
+              for(k=0; k<duty_macro->length; k++)
+                duty_macro->sequence[k] &= 1;
+            }
+
+            ftmacro *arp_macro = &instrument_macro[MS_ARPEGGIO][num_macro_arp];
+            ftmacro old = *arp_macro;
+            for(k=0; k<arp_macro->length; k++)
+              arp_macro->sequence[k] = (arp_macro->sequence[k]+j)&15;
+            write_instrument(output_file, i, 0); // disallow decay
+            *arp_macro = old;
+
+            // define a drum for the frequency
+            fprintf(output_file, "\r\ndrum %s_%x_ noise_%s_%x", instrument_name[i], j, instrument_name[i], j);
+          }
 
   // close files
   fclose(input_file);
