@@ -350,7 +350,7 @@ void write_macro(FILE *file, ftmacro *macro) {
       fprintf(file, "| ");
     fprintf(file, "%i ", macro->sequence[i]);
   }
-  fprintf(file, "\r\n");
+  fprintf(file, "\n");
 }
 
 // writes an octave using ' and ,
@@ -394,7 +394,7 @@ void write_instrument(FILE *file, int i, int flags) {
       // if a decay can be used, cut off the volume envelope at the decay point and write the decay command
       macro.sequence[decay_index] = decay_volume;
       macro.length = decay_index + 1;
-      fprintf(file, "  decay %i\r\n", decay_rate);
+      fprintf(file, "  decay %i\n", decay_rate);
     }
     fprintf(file, "  volume ");
     write_macro(file, &macro);
@@ -422,7 +422,7 @@ void write_instrument(FILE *file, int i, int flags) {
         write_octave(file, octave);
         fputc(' ', file);
       }
-      fprintf(file, "\r\n");
+      fprintf(file, "\n");
     } else {
       write_macro(file, macro);
     }
@@ -519,10 +519,10 @@ void write_pattern(FILE *file, int id, int channel) {
     error(1, "note with no instrument %s", error_location(&xsong, channel, id, -1));
 
   // generate pattern name and specify absolute octaves
-  fprintf(file, "\r\n  pattern pat_%i_%i_%i", song_num, channel, id);
+  fprintf(file, "\n  pattern pat_%i_%i_%i", song_num, channel, id);
   if(channel_is_pitched(channel))
-    fprintf(file, " with %s on %s\r\n    absolute", instrument_name[instrument], chan_name[channel]);
-  fprintf(file, "\r\n    ");
+    fprintf(file, " with %s on %s\n    absolute", instrument_name[instrument], chan_name[channel]);
+  fprintf(file, "\n    ");
 
   // for each row
   int row = 0;
@@ -712,10 +712,10 @@ int main(int argc, char *argv[]) {
   FILE *input_file = fopen(in_filename, "rb");
   if(!input_file)
     error(1,"Input file couldn't be opened");
-  FILE *output_file = fopen(out_filename, "wb");
+  FILE *output_file = fopen(out_filename, "w");
   if(!output_file)
     error(1,"Output file couldn't be opened");
-  fprintf(output_file, "durations stick\r\nnotenames english\r\n");
+  fprintf(output_file, "durations stick\nnotenames english\n");
 
   // process each line
   int need_song_export = 0;
@@ -906,21 +906,21 @@ int main(int argc, char *argv[]) {
       if(temp) {
         arg = temp+1;
       }
-      fprintf(output_file, "\r\ntitle %s", arg);
+      fprintf(output_file, "\ntitle %s", arg);
 	}
     else if(starts_with(buffer, "AUTHOR ", &arg)) {
       char *temp = strchr(arg, '\"');
       if(temp) {
         arg = temp+1;
       }
-      fprintf(output_file, "\r\nauthor %s", arg);
+      fprintf(output_file, "\nauthor %s", arg);
 	}
     else if(starts_with(buffer, "COPYRIGHT ", &arg)) {
       char *temp = strchr(arg, '\"');
       if(temp) {
         arg = temp+1;
       }
-      fprintf(output_file, "\r\ncopyright %s\r\n", arg);
+      fprintf(output_file, "\ncopyright %s\n", arg);
 	}
 
     // comments are used for song metadata
@@ -993,7 +993,7 @@ int main(int argc, char *argv[]) {
         sfx_num++;
       } else if(starts_with(arg, "drumsfx ", &arg2)) {
         // define a drum using sound effects
-        fprintf(output_file, "drum %s\r\n", arg2);
+        fprintf(output_file, "drum %s\n", arg2);
       } else if(starts_with(arg, "drum ", &arg2)) {
         // drum = assign a drum to a DPCM note
         char *note = strchr(scale, tolower(arg2[0]));
@@ -1124,9 +1124,9 @@ int main(int argc, char *argv[]) {
         for(int i=0; i<num_auto_drums; i++) {
           printf("%i noise %x, triangle %x\n", i, auto_drum_noise[i], auto_drum_tri[i]);
           if(auto_drum_tri[i] == 255)
-            fprintf(output_file, "\r\ndrum autodrum%i_ autonoise%x_", i, auto_drum_noise[i]);
+            fprintf(output_file, "\ndrum autodrum%i_ autonoise%x_", i, auto_drum_noise[i]);
           else
-            fprintf(output_file, "\r\ndrum autodrum%i_ autonoise%x_ autotriangle%x_", i, auto_drum_noise[i], auto_drum_tri[i]);
+            fprintf(output_file, "\ndrum autodrum%i_ autonoise%x_ autotriangle%x_", i, auto_drum_noise[i], auto_drum_tri[i]);
         }
       }
 
@@ -1138,7 +1138,7 @@ int main(int argc, char *argv[]) {
         const char *channel_name = chan_name[channel];
         if(channel == CH_SQUARE1)
           channel_name = "pulse";
-        fprintf(output_file, "\r\nsfx %s on %s\r\n", soundeffects[i].name, channel_name);
+        fprintf(output_file, "\nsfx %s on %s\n", soundeffects[i].name, channel_name);
 
         // use absolute pitch for non-noise; decay disallowed
         write_instrument(output_file, instrument, (channel != CH_NOISE)?ABSOLUTE_PITCH:0);
@@ -1146,15 +1146,15 @@ int main(int argc, char *argv[]) {
       // write instruments
       for(i=0; i<MAX_INSTRUMENTS; i++)
         if(instrument_used[i]) {
-          fprintf(output_file, "\r\ninstrument %s\r\n", instrument_name[i]);
+          fprintf(output_file, "\ninstrument %s\n", instrument_name[i]);
           write_instrument(output_file, i, ALLOW_DECAY);
         }
       need_song_export = 1;
     }
     if(need_song_export) {
-      fprintf(output_file, "\r\nsong %s\r\n  time 4/4\r\n  scale 16\r\n  title %s\r\n", xsong.name, xsong.real_name);
+      fprintf(output_file, "\nsong %s\n  time 4/4\n  scale 16\n  title %s\n", xsong.name, xsong.real_name);
       write_tempo(output_file, xsong.speed, xsong.tempo);
-      fprintf(output_file, "\r\n");
+      fprintf(output_file, "\n");
 
       // write the actually used (not empty) patterns
       for(j=0; j<CHANNEL_COUNT; j++)
@@ -1175,10 +1175,10 @@ int main(int argc, char *argv[]) {
       int channel_playing[CHANNEL_COUNT] = {1, 1, 1, auto_noise||auto_dual_drums, !(auto_noise||auto_dual_drums), 0};
       int total_rows = 0;
       for(i=0; i<xsong.frames; i++) {
-        fprintf(output_file, "\r\n  at ");
+        fprintf(output_file, "\n  at ");
         write_time(output_file, total_rows);
         if(xsong.loop_to == i && xsong.loop_to)
-          fprintf(output_file, "\r\n  segno");
+          fprintf(output_file, "\n  segno");
 
         int min_length = MAX_ROWS; // minimum pattern length in this frame
         for(j=0; j<CHANNEL_COUNT; j++) {
@@ -1186,13 +1186,13 @@ int main(int argc, char *argv[]) {
           if(( (!(auto_noise||auto_dual_drums) && j != CH_NOISE)
              || ((auto_noise||auto_dual_drums) && j != CH_DPCM))
             && xsong.pattern_used[pattern][j]) {
-            fprintf(output_file, "\r\n  play pat_%i_%i_%i", song_num, j, pattern);
+            fprintf(output_file, "\n  play pat_%i_%i_%i", song_num, j, pattern);
             channel_playing[j] = 1;
           } else if(channel_playing[j]) { // stop channel if it was playing but now it isn't
             if(j == CH_NOISE || j == CH_DPCM)
-              fprintf(output_file, "\r\n  stop drum");
+              fprintf(output_file, "\n  stop drum");
             else
-              fprintf(output_file, "\r\n  stop %s", chan_name[j]);
+              fprintf(output_file, "\n  stop %s", chan_name[j]);
             channel_playing[j] = 0;
           }
           if(xsong.pattern_length[pattern][j] < min_length)
@@ -1216,23 +1216,23 @@ int main(int argc, char *argv[]) {
           }
           if(speed||tempo||(attack>=0)) {
             if(row) {
-              fprintf(output_file, "\r\n  at ");
+              fprintf(output_file, "\n  at ");
               write_time(output_file, total_rows+row);
             }
             if(speed||tempo) {
-              fprintf(output_file, "\r\n");
+              fprintf(output_file, "\n");
               write_tempo(output_file, speed?speed:xsong.speed, tempo?tempo:xsong.tempo);
             }
             if(attack>=0) {
-              fprintf(output_file, "\r\n  attack on %s", chan_name[attack]);
+              fprintf(output_file, "\n  attack on %s", chan_name[attack]);
             }
           }
         }
         total_rows += min_length;
       }
-      fprintf(output_file, "\r\n  at ");
+      fprintf(output_file, "\n  at ");
       write_time(output_file, total_rows);
-      fprintf(output_file, "\r\n  ");
+      fprintf(output_file, "\n  ");
       if(xsong.loop_to != -1)
         fprintf(output_file, "dal segno");
       else
@@ -1252,7 +1252,7 @@ int main(int argc, char *argv[]) {
         for(j=0; j<16; j++)
           if(instrument_noise[i] & (1 << j)) {
             // make a new sound effect for the noise frequency
-            fprintf(output_file, "\r\nsfx noise_%s_%x on noise\r\n", instrument_name[i], j);
+            fprintf(output_file, "\nsfx noise_%s_%x on noise\n", instrument_name[i], j);
 
             // get the arpeggio envelope, change it and restore it to what it was
             unsigned int num_macro_arp    = (unsigned)instrument[i][MS_ARPEGGIO];
@@ -1282,12 +1282,12 @@ int main(int argc, char *argv[]) {
             *arp_macro = old;
 
             // define a drum for the frequency
-            fprintf(output_file, "\r\ndrum %s_%x_ noise_%s_%x", instrument_name[i], j, instrument_name[i], j);
+            fprintf(output_file, "\ndrum %s_%x_ noise_%s_%x", instrument_name[i], j, instrument_name[i], j);
           }
 
   // close files
   fclose(input_file);
-  fprintf(output_file, "\r\n\r\n");
+  fprintf(output_file, "\n\n");
   fclose(output_file);
 
   return 0;
